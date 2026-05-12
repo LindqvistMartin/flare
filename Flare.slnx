@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Flare.Api/Flare.Api.csproj" />
+    <Project Path="src/Flare.Core/Flare.Core.csproj" />
+    <Project Path="src/Flare.Infrastructure/Flare.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Flare.Tests.Integration/Flare.Tests.Integration.csproj" />
+    <Project Path="tests/Flare.Tests.Unit/Flare.Tests.Unit.csproj" />
+  </Folder>
+</Solution>
