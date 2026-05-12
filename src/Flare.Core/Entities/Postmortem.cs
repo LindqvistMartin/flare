@@ -20,13 +20,12 @@ public sealed class Postmortem
 
     public Postmortem(Guid incidentId, string impact, string timeline, string rootCause)
     {
-        ArgumentNullException.ThrowIfNull(timeline);
         Id = Guid.NewGuid();
         IncidentId = incidentId;
         Status = PostmortemStatus.Draft;
-        Impact = impact;
-        Timeline = timeline;
-        RootCause = rootCause;
+        Impact = impact ?? string.Empty;
+        Timeline = string.IsNullOrWhiteSpace(timeline) ? "[]" : timeline;
+        RootCause = rootCause ?? string.Empty;
         CreatedAt = DateTime.UtcNow;
     }
 
@@ -38,6 +37,8 @@ public sealed class Postmortem
 
     public void Update(string impact, string rootCause)
     {
+        ArgumentNullException.ThrowIfNull(impact);
+        ArgumentNullException.ThrowIfNull(rootCause);
         Impact = impact;
         RootCause = rootCause;
     }

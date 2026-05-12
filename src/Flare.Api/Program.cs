@@ -26,6 +26,8 @@ var connectionString = builder.Configuration.GetConnectionString("Postgres")
 
 builder.Services.AddInfrastructure(connectionString);
 builder.Services.AddOpenApi();
+builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
+    p.WithOrigins("http://localhost:5173").AllowAnyMethod().AllowAnyHeader().AllowCredentials()));
 
 builder.Services.AddOpenTelemetry()
     .WithTracing(t => t
@@ -51,6 +53,7 @@ using (var scope = app.Services.CreateScope())
 }
 
 app.UseSerilogRequestLogging();
+app.UseCors();
 
 app.MapGet("/", () => "Flare API");
 app.MapGet("/healthz", () => Results.Ok(new { status = "ok" }));
