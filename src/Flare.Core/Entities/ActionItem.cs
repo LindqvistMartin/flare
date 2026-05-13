@@ -29,4 +29,8 @@ public sealed class ActionItem
     }
 
     public void Transition(ActionItemStatus next) => Status = next;
+
+    public void UpdateOwner(Guid? ownerId) => OwnerId = ownerId;
+
+    public void UpdateDueDate(DateOnly? dueDate) => DueDate = dueDate;
 }

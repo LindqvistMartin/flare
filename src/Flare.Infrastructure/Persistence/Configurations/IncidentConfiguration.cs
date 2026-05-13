@@ -12,11 +12,14 @@ internal sealed class IncidentConfiguration : IEntityTypeConfiguration<Incident>
         builder.Property(x => x.Title).HasMaxLength(500).IsRequired();
         builder.Property(x => x.Status).HasConversion<string>().HasMaxLength(50).IsRequired();
         builder.Property(x => x.Severity).HasConversion<string>().HasMaxLength(10).IsRequired();
+        builder.Property(x => x.ResponderId).IsRequired(false);
         builder.HasIndex(x => new { x.ServiceId, x.Status });
         builder.HasIndex(x => new { x.ServiceId, x.CreatedAt });
         builder.HasOne(x => x.Service)
             .WithMany(x => x.Incidents)
             .HasForeignKey(x => x.ServiceId)
             .OnDelete(DeleteBehavior.Cascade);
+
+        builder.Navigation(x => x.Events).UsePropertyAccessMode(PropertyAccessMode.Field);
     }
 }
