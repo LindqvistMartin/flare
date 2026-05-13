@@ -1,3 +1,5 @@
+using Flare.Api.Endpoints;
+using Flare.Api.Middleware;
 using Flare.Infrastructure;
 using Flare.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -25,6 +27,7 @@ var connectionString = builder.Configuration.GetConnectionString("Postgres")
     ?? throw new InvalidOperationException("ConnectionStrings:Postgres is required");
 
 builder.Services.AddInfrastructure(connectionString);
+builder.Services.AddMemoryCache();
 builder.Services.AddOpenApi();
 builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
     p.WithOrigins("http://localhost:5173").AllowAnyMethod().AllowAnyHeader().AllowCredentials()));
@@ -54,6 +57,7 @@ using (var scope = app.Services.CreateScope())
 
 app.UseSerilogRequestLogging();
 app.UseCors();
+app.UseMiddleware<IdempotencyMiddleware>();
 
 app.MapGet("/", () => "Flare API");
 app.MapGet("/healthz", () => Results.Ok(new { status = "ok" }));
@@ -62,6 +66,11 @@ app.MapGet("/healthz/ready", async (FlareDbContext db, CancellationToken ct) =>
     var ok = await db.Database.CanConnectAsync(ct);
     return ok ? Results.Ok(new { status = "ready" }) : Results.StatusCode(503);
 });
+
+app.MapIncidentEndpoints();
+app.MapServiceEndpoints();
+app.MapActionItemEndpoints();
+app.MapWebhookEndpoints();
 
 app.MapOpenApi();
 app.MapScalarApiReference();
