@@ -1,5 +1,6 @@
 using Flare.Api.Endpoints;
 using Flare.Api.Middleware;
+using Flare.Core.Services;
 using Flare.Infrastructure;
 using Flare.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -28,6 +29,7 @@ var connectionString = builder.Configuration.GetConnectionString("Postgres")
 
 builder.Services.AddInfrastructure(connectionString);
 builder.Services.AddMemoryCache();
+builder.Services.AddSingleton<PostmortemDraftBuilder>();
 builder.Services.AddOpenApi();
 builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
     p.WithOrigins("http://localhost:5173").AllowAnyMethod().AllowAnyHeader().AllowCredentials()));
@@ -71,6 +73,7 @@ app.MapIncidentEndpoints();
 app.MapServiceEndpoints();
 app.MapActionItemEndpoints();
 app.MapWebhookEndpoints();
+app.MapPostmortemEndpoints();
 
 app.MapOpenApi();
 app.MapScalarApiReference();
