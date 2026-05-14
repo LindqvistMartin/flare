@@ -37,6 +37,8 @@ public sealed class Postmortem
 
     public void Update(string impact, string rootCause)
     {
+        if (Status == PostmortemStatus.Published)
+            throw new InvalidOperationException("Cannot update a published postmortem.");
         ArgumentNullException.ThrowIfNull(impact);
         ArgumentNullException.ThrowIfNull(rootCause);
         Impact = impact;
