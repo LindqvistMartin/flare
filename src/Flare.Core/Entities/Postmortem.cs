@@ -42,4 +42,16 @@ public sealed class Postmortem
         Impact = impact;
         RootCause = rootCause;
     }
+
+    public void Regenerate(string impact, string timeline, string rootCause)
+    {
+        if (Status == PostmortemStatus.Published)
+            throw new InvalidOperationException("Cannot regenerate a published postmortem.");
+        ArgumentNullException.ThrowIfNull(impact);
+        ArgumentException.ThrowIfNullOrWhiteSpace(timeline);
+        ArgumentNullException.ThrowIfNull(rootCause);
+        Impact = impact;
+        Timeline = timeline;
+        RootCause = rootCause;
+    }
 }
