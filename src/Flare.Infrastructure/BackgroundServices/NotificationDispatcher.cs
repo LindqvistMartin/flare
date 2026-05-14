@@ -55,7 +55,7 @@ public sealed class NotificationDispatcher(
         foreach (var msg in messages)
         {
             logger.LogInformation("Dispatching outbox message {Type} {Id}", msg.Type, msg.Id);
-            // Real channel dispatch wired in Evening 4 (Slack, Teams)
+            // Real channel dispatch (Slack, Teams) is wired in a later change; this skeleton just marks processed.
             msg.MarkProcessed();
         }
 
