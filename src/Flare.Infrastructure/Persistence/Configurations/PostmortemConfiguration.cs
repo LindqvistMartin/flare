@@ -14,6 +14,12 @@ internal sealed class PostmortemConfiguration : IEntityTypeConfiguration<Postmor
         builder.Property(x => x.Timeline).HasColumnType("jsonb").IsRequired();
         builder.Property(x => x.RootCause).HasColumnType("text");
         builder.HasIndex(x => x.IncidentId).IsUnique();
+        // Map shadow property to Postgres' system xmin column for optimistic concurrency without a schema change.
+        builder.Property<uint>("xmin")
+            .HasColumnName("xmin")
+            .HasColumnType("xid")
+            .ValueGeneratedOnAddOrUpdate()
+            .IsConcurrencyToken();
         builder.HasOne(x => x.Incident)
             .WithOne(x => x.Postmortem)
             .HasForeignKey<Postmortem>(x => x.IncidentId)
