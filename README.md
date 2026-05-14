@@ -6,22 +6,23 @@
 [![.NET](https://img.shields.io/badge/.NET-10-purple.svg)](https://dotnet.microsoft.com)
 [![React](https://img.shields.io/badge/React-18-61dafb.svg)](https://react.dev)
 
-> Work in progress.
-
 ## Architecture
 
 Single deployable monolith. ASP.NET Core 10 Minimal API on the front edge, EF Core
-with Postgres for storage, stock `BackgroundService` + `Channel<T>` for ingestion
-and outbox dispatch, OpenTelemetry for tracing and metrics, Serilog for structured
+with Postgres for storage, `BackgroundService` + `Channel<T>` for ingestion and
+outbox dispatch, OpenTelemetry for tracing and metrics, Serilog for structured
 logs, Scalar UI on `/scalar` for the OpenAPI document.
 
 ```
                 ┌──────────────────────────────────────────────────┐
-   alerts ───▶  │ POST /api/v1/webhooks/ingest/{source}            │
-  (Prometheus,  │   IAlertIngestionAdapter  (4 implementations)    │
-   Grafana,     │   Channel<IngestionJob>  (bounded, DropWrite)    │
-   PulseWatch,  └──────────────────────────────────────────────────┘
-   generic)                                │
+   alerts ───▶  │ API: POST /api/v1/webhooks/ingest/{source}       │
+  (Prometheus,  │   IAlertIngestionAdapter (4 implementations)     │
+   Grafana,     │   Channel<IngestionJob>   (bounded, DropWrite)   │
+   PulseWatch,  │                                                  │
+   generic)     │ API: POST /api/v1/incidents/{id}/postmortem/...  │
+                │   PostmortemDraftBuilder  (inline, synchronous)  │
+                └──────────────────────────────────────────────────┘
+                                           │
                                            ▼
                 ┌──────────────────────────────────────────────────┐
                 │ IngestionWorker : BackgroundService              │
@@ -35,12 +36,12 @@ logs, Scalar UI on `/scalar` for the OpenAPI document.
                 │   incidents, incident_events (append-only),      │
                 │   postmortems, action_items, outbox_messages     │
                 └──────────────────────────────────────────────────┘
-                          │                            │
-                          ▼                            ▼
-              ┌────────────────────────┐   ┌──────────────────────┐
-              │ NotificationDispatcher │   │ PostmortemDraftBuilder│
-              │   outbox SKIP LOCKED   │   │   timeline from events│
-              └────────────────────────┘   └──────────────────────┘
+                                           │
+                                           ▼
+                          ┌────────────────────────┐
+                          │ NotificationDispatcher │
+                          │   outbox SKIP LOCKED   │
+                          └────────────────────────┘
 ```
 
 Incident events are append-only at the Postgres trigger level — see
