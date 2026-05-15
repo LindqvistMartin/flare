@@ -35,6 +35,9 @@ public sealed class MetricsAggregator(
         var db = scope.ServiceProvider.GetRequiredService<FlareDbContext>();
 
         // CONCURRENTLY needs the unique index and a populated matview (WITH DATA at migrate time covers both).
+        // The two REFRESHes are intentionally NOT wrapped in a transaction — REFRESH MATERIALIZED VIEW
+        // CONCURRENTLY can't run inside a transaction block. If the second call fails, MTTA is up to one
+        // interval stale until the next tick. Acceptable for a 5-minute MVP metric.
         await db.Database.ExecuteSqlRawAsync(
             "REFRESH MATERIALIZED VIEW CONCURRENTLY mttr_by_service_30d;", ct);
         await db.Database.ExecuteSqlRawAsync(

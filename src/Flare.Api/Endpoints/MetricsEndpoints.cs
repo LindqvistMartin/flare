@@ -15,7 +15,8 @@ public static class MetricsEndpoints
         {
             var rows = await db.MttrByService30d
                 .OrderBy(r => r.ServiceName)
-                .Select(r => r.ToResponse())
+                .Select(r => new ServiceMttrResponse(
+                    r.ServiceId, r.ServiceName, r.IncidentCount, r.AvgMttrMs, r.P50MttrMs))
                 .ToListAsync(ct);
             return Results.Ok(rows);
         });
@@ -24,7 +25,8 @@ public static class MetricsEndpoints
         {
             var rows = await db.MttaByService30d
                 .OrderBy(r => r.ServiceName)
-                .Select(r => r.ToResponse())
+                .Select(r => new ServiceMttaResponse(
+                    r.ServiceId, r.ServiceName, r.IncidentCount, r.AvgMttaMs, r.P50MttaMs))
                 .ToListAsync(ct);
             return Results.Ok(rows);
         });
@@ -45,7 +47,7 @@ public static class MetricsEndpoints
                 .Select(r => (double?)r.AvgMttrMs)
                 .AverageAsync(ct) ?? 0d;
 
-            return Results.Ok(new DashboardResponse(openCount, overdueCount, (long)mttrAvg));
+            return Results.Ok(new DashboardResponse(openCount, overdueCount, (long)Math.Round(mttrAvg)));
         });
 
         return app;
