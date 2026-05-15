@@ -30,6 +30,7 @@ public static class ServiceExtensions
 
         services.AddHostedService<IngestionWorker>();
         services.AddHostedService<NotificationDispatcher>();
+        services.AddHostedService<MetricsAggregator>();
 
         return services;
     }
