@@ -74,6 +74,7 @@ app.MapServiceEndpoints();
 app.MapActionItemEndpoints();
 app.MapWebhookEndpoints();
 app.MapPostmortemEndpoints();
+app.MapMetricsEndpoints();
 
 app.MapOpenApi();
 app.MapScalarApiReference();

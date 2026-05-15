@@ -1,4 +1,5 @@
 using Flare.Core.Entities;
+using Flare.Infrastructure.Persistence.ReadModels;
 using Microsoft.EntityFrameworkCore;
 
 namespace Flare.Infrastructure.Persistence;
@@ -13,6 +14,8 @@ public sealed class FlareDbContext(DbContextOptions<FlareDbContext> options) : D
     public DbSet<Postmortem> Postmortems => Set<Postmortem>();
     public DbSet<ActionItem> ActionItems => Set<ActionItem>();
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
+    public DbSet<MttrByServiceRow> MttrByService30d => Set<MttrByServiceRow>();
+    public DbSet<MttaByServiceRow> MttaByService30d => Set<MttaByServiceRow>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
         => modelBuilder.ApplyConfigurationsFromAssembly(typeof(FlareDbContext).Assembly);
