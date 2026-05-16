@@ -1,6 +1,6 @@
 using Flare.Api.Endpoints;
-using Flare.Api.Hubs;
 using Flare.Api.Middleware;
+using Flare.Infrastructure.Hubs;
 using Flare.Core.Services;
 using Flare.Infrastructure;
 using Flare.Infrastructure.Persistence;

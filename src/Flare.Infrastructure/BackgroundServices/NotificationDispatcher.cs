@@ -1,4 +1,7 @@
+using System.Text.Json;
+using Flare.Infrastructure.Hubs;
 using Flare.Infrastructure.Persistence;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -8,6 +11,7 @@ namespace Flare.Infrastructure.BackgroundServices;
 
 public sealed class NotificationDispatcher(
     IServiceScopeFactory scopeFactory,
+    IHubContext<FlareHub> hub,
     ILogger<NotificationDispatcher> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken ct)
@@ -55,11 +59,54 @@ public sealed class NotificationDispatcher(
         foreach (var msg in messages)
         {
             logger.LogInformation("Dispatching outbox message {Type} {Id}", msg.Type, msg.Id);
-            // Real channel dispatch (Slack, Teams) is wired in a later change; this skeleton just marks processed.
+            await BroadcastAsync(msg.Type, msg.Payload, msg.Id, ct);
             msg.MarkProcessed();
         }
 
         await db.SaveChangesAsync(ct);
         await tx.CommitAsync(ct);
+    }
+
+    private async Task BroadcastAsync(string type, string payload, Guid messageId, CancellationToken ct)
+    {
+        try
+        {
+            Guid? incidentId = null;
+            using (var doc = JsonDocument.Parse(payload))
+            {
+                if (doc.RootElement.ValueKind == JsonValueKind.Object &&
+                    doc.RootElement.TryGetProperty("IncidentId", out var prop) &&
+                    prop.ValueKind == JsonValueKind.String &&
+                    prop.TryGetGuid(out var parsed))
+                {
+                    incidentId = parsed;
+                }
+            }
+
+            switch (type)
+            {
+                case "IncidentCreated":
+                    await hub.Clients.Group("dashboard")
+                        .SendAsync("IncidentCreated", payload, ct);
+                    break;
+                case "IncidentStatusChanged" when incidentId is not null:
+                    await hub.Clients.Group("dashboard")
+                        .SendAsync("IncidentStatusChanged", payload, ct);
+                    await hub.Clients.Group($"incident:{incidentId}")
+                        .SendAsync("IncidentStatusChanged", payload, ct);
+                    break;
+                case "IncidentEventAdded" when incidentId is not null:
+                    await hub.Clients.Group($"incident:{incidentId}")
+                        .SendAsync("IncidentEventAdded", payload, ct);
+                    break;
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Best-effort broadcast. Mark-processed proceeds regardless so a transient SignalR
+            // drop does not turn an outbox row into a poison message that retries forever.
+            // Clients refetch on (re)connect to recover any missed events.
+            logger.LogWarning(ex, "SignalR broadcast failed for {Type} {Id}", type, messageId);
+        }
     }
 }

@@ -1,6 +1,6 @@
 using Microsoft.AspNetCore.SignalR;
 
-namespace Flare.Api.Hubs;
+namespace Flare.Infrastructure.Hubs;
 
 public sealed class FlareHub : Hub
 {
