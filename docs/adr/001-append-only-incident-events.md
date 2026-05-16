@@ -53,9 +53,14 @@ Inserts are unrestricted — the table grows monotonically.
   once retention requires it; not in MVP scope.
 - Tests that need to seed historical timestamps cannot `UPDATE` after insert and
   must construct events with the timestamps they need. Acceptable.
+- The trigger is `FOR EACH ROW`, so `TRUNCATE` is not blocked. Anyone with
+  `TRUNCATE` privilege on `"IncidentEvents"` can wipe the table in one statement;
+  the guarantee is "no per-row rewrite," not "no destruction." Test cleanup
+  intentionally relies on this. Production should never grant `TRUNCATE` on this
+  table to the application role.
 
 ## Verification
 
-An integration test (planned) attempts `UPDATE` and `DELETE` via raw SQL against
+`AppendOnlyConstraintTests` exercises `UPDATE` and `DELETE` via raw SQL against
 `"IncidentEvents"` and asserts that Postgres raises the trigger exception in both
 cases.
