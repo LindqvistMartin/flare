@@ -50,8 +50,10 @@ logs, Scalar UI on `/scalar` for the OpenAPI document.
 Incident events are append-only at the Postgres trigger level — see
 [ADR-001](docs/adr/001-append-only-incident-events.md). Postmortems materialise
 from the event stream rather than being typed by hand — see
-[ADR-002](docs/adr/002-postmortem-from-events.md). MTTR and MTTA are aggregated
-per service over a rolling 30-day window from the canonical `Incident.ResolvedAt`
-and `Incident.AcknowledgedAt` timestamps — the domain state machine writes those
-atomically with the matching event, so the matview SQL stays fast and independent
-of event payload format.
+[ADR-002](docs/adr/002-postmortem-from-events.md). Notifications are dispatched
+via an outbox + `SKIP LOCKED` polling worker that broadcasts to SignalR groups
+best-effort — see [ADR-003](docs/adr/003-outbox-notification-dispatch.md). MTTR
+and MTTA are aggregated per service over a rolling 30-day window from the
+canonical `Incident.ResolvedAt` and `Incident.AcknowledgedAt` timestamps — the
+domain state machine writes those atomically with the matching event, so the
+matview SQL stays fast and independent of event payload format.
