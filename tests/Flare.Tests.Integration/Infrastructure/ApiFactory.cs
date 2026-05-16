@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Testcontainers.PostgreSql;
 using Xunit;
@@ -22,8 +23,13 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
     public async Task InitializeAsync()
     {
         await _pg.StartAsync();
-        // Trigger lazy host build — Program.cs runs MigrateAsync on startup.
+        // Force lazy host build, then run migrations explicitly — relying on Program.cs'
+        // top-level MigrateAsync via the WebApplicationFactory codepath is racy because the
+        // factory short-circuits app.Run().
         _ = Server;
+        using var scope = Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<FlareDbContext>();
+        await db.Database.MigrateAsync();
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -43,7 +49,8 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
         builder.ConfigureTestServices(services =>
         {
             // Hosted services register as (IHostedService, implType). RemoveAll<T> matches on
-            // ServiceType, so remove by ImplementationType to keep framework infrastructure intact.
+            // ServiceType, so filter by ImplementationType. Use RemoveAll with predicate so a
+            // future double-registration does not crash the fixture with InvalidOperationException.
             RemoveHosted<IngestionWorker>(services);
             RemoveHosted<NotificationDispatcher>(services);
             RemoveHosted<MetricsAggregator>(services);
@@ -56,21 +63,37 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
         var db = scope.ServiceProvider.GetRequiredService<FlareDbContext>();
         // TRUNCATE skips row-level triggers, so the IncidentEvents append-only trigger
         // does not block test cleanup. CASCADE chases all FK dependents in one statement.
+        // Adding a new entity? Append its table here — the list is not driven by EF metadata.
         await db.Database.ExecuteSqlRawAsync(
             """TRUNCATE TABLE "ActionItems", "Postmortems", "OutboxMessages", "IncidentEvents", "Incidents", "Services", "Teams", "Organizations" CASCADE""");
+        // Matviews do not follow FK CASCADE; refresh them so metrics tests see an empty state
+        // matching the wiped base tables. CONCURRENTLY needs the unique index that the migration provides.
+        await db.Database.ExecuteSqlRawAsync("""REFRESH MATERIALIZED VIEW CONCURRENTLY mttr_by_service_30d""");
+        await db.Database.ExecuteSqlRawAsync("""REFRESH MATERIALIZED VIEW CONCURRENTLY mtta_by_service_30d""");
     }
 
-    public new async Task DisposeAsync()
+    public override async ValueTask DisposeAsync()
     {
-        await _pg.DisposeAsync();
+        // Tear down the host first so open Npgsql connections close cleanly before the
+        // container goes away. Reversing the order leaks connections and produces noisy
+        // teardown errors when DbContext pool or telemetry exporters flush.
         await base.DisposeAsync();
+        await _pg.DisposeAsync();
     }
+
+    // xUnit 2.x IAsyncLifetime.DisposeAsync returns Task; WebApplicationFactory.DisposeAsync
+    // returns ValueTask. Explicit interface impl bridges the signatures so both teardown
+    // paths converge on the same logic.
+    Task IAsyncLifetime.DisposeAsync() => DisposeAsync().AsTask();
 
     private static void RemoveHosted<T>(IServiceCollection services) where T : IHostedService
     {
-        var descriptor = services.SingleOrDefault(d =>
-            d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(T));
-        if (descriptor is not null)
-            services.Remove(descriptor);
+        // Iterate-and-remove tolerates accidental duplicate registrations; SingleOrDefault
+        // would explode the fixture with an opaque InvalidOperationException at host build.
+        var matches = services
+            .Where(d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(T))
+            .ToList();
+        foreach (var d in matches)
+            services.Remove(d);
     }
 }
