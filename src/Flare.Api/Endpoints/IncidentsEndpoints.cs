@@ -54,9 +54,13 @@ public static class IncidentsEndpoints
             var incident = new Incident(req.ServiceId, req.Title, severity);
             var evt = new IncidentEvent(incident.Id, IncidentEventType.Created,
                 JsonSerializer.Serialize(new { req.Title, Severity = severity.ToString() }), actorId: null);
+            var outbox = new OutboxMessage(
+                "IncidentCreated",
+                JsonSerializer.Serialize(new { IncidentId = incident.Id, Source = "manual" }));
 
             db.Incidents.Add(incident);
             db.IncidentEvents.Add(evt);
+            db.OutboxMessages.Add(outbox);
             await db.SaveChangesAsync(ct);
 
             return Results.Created($"/api/v1/incidents/{incident.Id}", incident.ToResponse());
@@ -154,7 +158,12 @@ public static class IncidentsEndpoints
                 return Results.Problem(statusCode: 404, title: "Incident not found");
 
             var evt = new IncidentEvent(incident.Id, eventType, req.Payload, actorId: null);
+            var outbox = new OutboxMessage(
+                "IncidentEventAdded",
+                JsonSerializer.Serialize(new { IncidentId = id, EventId = evt.Id, Type = eventType.ToString() }));
+
             db.IncidentEvents.Add(evt);
+            db.OutboxMessages.Add(outbox);
             await db.SaveChangesAsync(ct);
 
             return Results.Created($"/api/v1/incidents/{id}/events/{evt.Id}", evt.ToResponse());
