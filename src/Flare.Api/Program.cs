@@ -1,4 +1,5 @@
 using Flare.Api.Endpoints;
+using Flare.Api.Hubs;
 using Flare.Api.Middleware;
 using Flare.Core.Services;
 using Flare.Infrastructure;
@@ -31,6 +32,7 @@ builder.Services.AddInfrastructure(connectionString);
 builder.Services.AddMemoryCache();
 builder.Services.AddSingleton<PostmortemDraftBuilder>();
 builder.Services.AddOpenApi();
+builder.Services.AddSignalR();
 builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
     p.WithOrigins("http://localhost:5173").AllowAnyMethod().AllowAnyHeader().AllowCredentials()));
 
@@ -75,6 +77,8 @@ app.MapActionItemEndpoints();
 app.MapWebhookEndpoints();
 app.MapPostmortemEndpoints();
 app.MapMetricsEndpoints();
+
+app.MapHub<FlareHub>("/hubs/flare");
 
 app.MapOpenApi();
 app.MapScalarApiReference();
