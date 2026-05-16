@@ -14,13 +14,17 @@ public sealed class NotificationDispatcher(
     IHubContext<FlareHub> hub,
     ILogger<NotificationDispatcher> logger) : BackgroundService
 {
+    private readonly record struct PendingBroadcast(Guid Id, string Type, string Payload);
+
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
         {
             try
             {
-                await DispatchBatchAsync(ct);
+                var batch = await CommitBatchAsync(ct);
+                foreach (var msg in batch)
+                    await BroadcastAsync(msg, ct);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -31,7 +35,7 @@ public sealed class NotificationDispatcher(
         }
     }
 
-    private async Task DispatchBatchAsync(CancellationToken ct)
+    private async Task<IReadOnlyList<PendingBroadcast>> CommitBatchAsync(CancellationToken ct)
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<FlareDbContext>();
@@ -53,60 +57,96 @@ public sealed class NotificationDispatcher(
         if (messages.Count == 0)
         {
             await tx.RollbackAsync(ct);
-            return;
+            return Array.Empty<PendingBroadcast>();
         }
 
+        var pending = new List<PendingBroadcast>(messages.Count);
         foreach (var msg in messages)
         {
             logger.LogInformation("Dispatching outbox message {Type} {Id}", msg.Type, msg.Id);
-            await BroadcastAsync(msg.Type, msg.Payload, msg.Id, ct);
             msg.MarkProcessed();
+            pending.Add(new PendingBroadcast(msg.Id, msg.Type, msg.Payload));
         }
 
+        // Persist mark-processed first. If this throws, the transaction rolls back and the
+        // same rows reappear on the next tick — no broadcasts have fired yet, so re-dispatch
+        // is safe (no duplicates on the wire).
         await db.SaveChangesAsync(ct);
         await tx.CommitAsync(ct);
+
+        return pending;
     }
 
-    private async Task BroadcastAsync(string type, string payload, Guid messageId, CancellationToken ct)
+    private async Task BroadcastAsync(PendingBroadcast msg, CancellationToken ct)
     {
         try
         {
-            Guid? incidentId = null;
-            using (var doc = JsonDocument.Parse(payload))
-            {
-                if (doc.RootElement.ValueKind == JsonValueKind.Object &&
-                    doc.RootElement.TryGetProperty("IncidentId", out var prop) &&
-                    prop.ValueKind == JsonValueKind.String &&
-                    prop.TryGetGuid(out var parsed))
-                {
-                    incidentId = parsed;
-                }
-            }
+            Guid? incidentId = TryExtractIncidentId(msg.Payload);
 
-            switch (type)
+            switch (msg.Type)
             {
                 case "IncidentCreated":
                     await hub.Clients.Group("dashboard")
-                        .SendAsync("IncidentCreated", payload, ct);
+                        .SendAsync("IncidentCreated", msg.Payload, ct);
                     break;
-                case "IncidentStatusChanged" when incidentId is not null:
+                case "IncidentStatusChanged":
+                    // Dashboard always sees status changes — incident-scoped broadcast is
+                    // best-effort because the IncidentId may be malformed.
                     await hub.Clients.Group("dashboard")
-                        .SendAsync("IncidentStatusChanged", payload, ct);
-                    await hub.Clients.Group($"incident:{incidentId}")
-                        .SendAsync("IncidentStatusChanged", payload, ct);
+                        .SendAsync("IncidentStatusChanged", msg.Payload, ct);
+                    if (incidentId is { } sid)
+                        await hub.Clients.Group($"incident:{sid}")
+                            .SendAsync("IncidentStatusChanged", msg.Payload, ct);
+                    else
+                        logger.LogWarning(
+                            "Outbox message {Type} {Id} has no IncidentId; incident-scoped broadcast skipped",
+                            msg.Type, msg.Id);
                     break;
-                case "IncidentEventAdded" when incidentId is not null:
-                    await hub.Clients.Group($"incident:{incidentId}")
-                        .SendAsync("IncidentEventAdded", payload, ct);
+                case "IncidentEventAdded":
+                    if (incidentId is { } eid)
+                    {
+                        await hub.Clients.Group($"incident:{eid}")
+                            .SendAsync("IncidentEventAdded", msg.Payload, ct);
+                    }
+                    else
+                    {
+                        logger.LogWarning(
+                            "Outbox message {Type} {Id} has no IncidentId; broadcast skipped",
+                            msg.Type, msg.Id);
+                    }
+                    break;
+                default:
+                    logger.LogWarning(
+                        "Outbox message {Type} {Id} has no broadcast route; ignored",
+                        msg.Type, msg.Id);
                     break;
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            // Best-effort broadcast. Mark-processed proceeds regardless so a transient SignalR
-            // drop does not turn an outbox row into a poison message that retries forever.
-            // Clients refetch on (re)connect to recover any missed events.
-            logger.LogWarning(ex, "SignalR broadcast failed for {Type} {Id}", type, messageId);
+            // Best-effort broadcast. The row is already marked processed; retrying here
+            // would create poison messages. Clients refetch on (re)connect to recover.
+            logger.LogWarning(ex, "SignalR broadcast failed for {Type} {Id}", msg.Type, msg.Id);
+        }
+    }
+
+    private Guid? TryExtractIncidentId(string payload)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(payload);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+                return null;
+            if (!doc.RootElement.TryGetProperty("IncidentId", out var prop))
+                return null;
+            if (prop.ValueKind != JsonValueKind.String)
+                return null;
+            return prop.TryGetGuid(out var parsed) ? parsed : null;
+        }
+        catch (JsonException ex)
+        {
+            logger.LogWarning(ex, "Outbox payload is not valid JSON; falling back to type-only routing");
+            return null;
         }
     }
 }
