@@ -5,15 +5,17 @@ using Flare.Infrastructure.BackgroundServices;
 using Flare.Infrastructure.Ingestion;
 using Flare.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Flare.Infrastructure;
 
 public static class ServiceExtensions
 {
-    public static IServiceCollection AddInfrastructure(this IServiceCollection services, string connectionString)
+    public static IServiceCollection AddInfrastructure(this IServiceCollection services)
     {
-        services.AddDbContext<FlareDbContext>(o => o.UseNpgsql(connectionString));
+        services.AddDbContext<FlareDbContext>((sp, o) =>
+            o.UseNpgsql(sp.GetRequiredService<IConfiguration>().GetConnectionString("Postgres")));
 
         var channel = Channel.CreateBounded<IngestionJob>(
             new BoundedChannelOptions(500) { FullMode = BoundedChannelFullMode.DropWrite });

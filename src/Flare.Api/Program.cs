@@ -25,10 +25,10 @@ builder.Host.UseSerilog((ctx, cfg) => cfg
     .Enrich.WithEnvironmentName()
     .WriteTo.Console(outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj} {Properties:j}{NewLine}{Exception}"));
 
-var connectionString = builder.Configuration.GetConnectionString("Postgres")
-    ?? throw new InvalidOperationException("ConnectionStrings:Postgres is required");
+if (string.IsNullOrWhiteSpace(builder.Configuration.GetConnectionString("Postgres")))
+    throw new InvalidOperationException("ConnectionStrings:Postgres is required");
 
-builder.Services.AddInfrastructure(connectionString);
+builder.Services.AddInfrastructure();
 builder.Services.AddMemoryCache();
 builder.Services.AddSingleton<PostmortemDraftBuilder>();
 builder.Services.AddOpenApi();
