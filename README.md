@@ -6,7 +6,7 @@
 [![.NET](https://img.shields.io/badge/.NET-10-purple.svg)](https://dotnet.microsoft.com)
 [![React](https://img.shields.io/badge/React-18-61dafb.svg)](https://react.dev)
 [![CI](https://github.com/LindqvistMartin/flare/actions/workflows/ci.yml/badge.svg)](https://github.com/LindqvistMartin/flare/actions)
-[![Tests](https://img.shields.io/badge/tests-80%20passing-brightgreen.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-97%20passing-brightgreen.svg)](#)
 
 ## Architecture
 
@@ -59,3 +59,38 @@ and MTTA are aggregated per service over a rolling 30-day window from the
 canonical `Incident.ResolvedAt` and `Incident.AcknowledgedAt` timestamps — the
 domain state machine writes those atomically with the matching event, so the
 matview SQL stays fast and independent of event payload format.
+
+## Backend features
+
+- **Webhook ingestion** — Prometheus, Grafana, PulseWatch, and a Generic adapter
+  behind one `IAlertIngestionAdapter` interface. Inbound requests enqueue into a
+  bounded `Channel<IngestionJob>` (DropWrite) so the endpoint returns 202 Accepted
+  even when the worker is behind.
+- **Append-only timeline** — `IncidentEvents` is protected by a PostgreSQL
+  `BEFORE UPDATE OR DELETE` trigger; row mutation throws regardless of caller, ORM,
+  or migration framework.
+- **Domain state machine** — `Triggered → Investigating → Identified → Monitoring
+  → Resolved → Closed`, validated inside the aggregate. Invalid transitions surface
+  as RFC 7807 Problem+JSON 422 responses.
+- **Auto-drafted postmortems** — `PostmortemDraftBuilder` materialises Impact,
+  Timeline, and Root Cause directly from the event stream on demand. Postmortems
+  are immutable once `Published`.
+- **MTTR / MTTA materialized views** — `mttr_by_service_30d` and
+  `mtta_by_service_30d`, refreshed concurrently every five minutes by
+  `MetricsAggregator`.
+- **Outbox dispatch** — `NotificationDispatcher` polls with
+  `FOR UPDATE SKIP LOCKED`, marks rows processed, commits, *then* broadcasts to
+  SignalR groups and to configured Slack / Teams webhooks. At-least-once on DB,
+  at-most-once on the wire — see ADR-003 for the rationale.
+- **Slack & Teams channels** — pluggable via `INotificationChannel`; configured
+  through `Notifications:Slack:WebhookUrl` and `Notifications:Teams:WebhookUrl`.
+  Empty URL = silent skip, so Flare boots without any chat integration.
+- **Action item reminders** — `ActionItemReminderService` runs daily, emitting an
+  `ActionItemOverdue` outbox row per overdue action item; the dispatcher fans
+  these out to chat channels.
+- **Realtime UI plumbing** — SignalR hub at `/hubs/flare` with `dashboard` and
+  `incident:{id}` groups.
+- **Idempotent POSTs** — `Idempotency-Key` header deduplicates write requests for
+  five minutes via in-memory cache.
+- **Observability** — Serilog JSON logs, OpenTelemetry traces and metrics over
+  OTLP, `/metrics` for Prometheus scrape.

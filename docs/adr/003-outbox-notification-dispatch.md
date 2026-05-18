@@ -28,9 +28,11 @@ Status-changing endpoints write an `OutboxMessage` row in the same EF Core
 `SaveChangesAsync` call in an implicit transaction, so all `db.*.Add` calls
 between two saves either land together or not at all. **Convention:** producer
 sites that need a second `SaveChangesAsync` (e.g. dedup-check pattern) must
-wrap their adds in an explicit `BeginTransactionAsync` block. Three producers
+wrap their adds in an explicit `BeginTransactionAsync` block. Five producers
 follow this convention today: `IngestionWorker`, manual
-`POST /api/v1/incidents`, and `POST /api/v1/incidents/{id}/transition`.
+`POST /api/v1/incidents`, `POST /api/v1/incidents/{id}/transition`,
+`POST /api/v1/incidents/{id}/events`, and the daily
+`ActionItemReminderService` background tick.
 
 A `NotificationDispatcher` `BackgroundService` polls `"OutboxMessages"` every
 500ms with `FOR UPDATE SKIP LOCKED LIMIT 50`:
@@ -41,12 +43,18 @@ A `NotificationDispatcher` `BackgroundService` polls `"OutboxMessages"` every
 4. **After** the transaction commits, broadcast each message via
    `IHubContext<FlareHub>`.
 
-Today three `Type` values are produced:
+Four `Type` values are produced:
 
-- `IncidentCreated` — broadcast to SignalR group `dashboard`
+- `IncidentCreated` — broadcast to SignalR group `dashboard`; fans out to chat
+  channels.
 - `IncidentStatusChanged` — broadcast to `dashboard` always, plus
-  `incident:{IncidentId}` when the payload contains a parseable IncidentId
-- `IncidentEventAdded` — broadcast to `incident:{IncidentId}`
+  `incident:{IncidentId}` when the payload contains a parseable IncidentId;
+  fans out to chat channels.
+- `IncidentEventAdded` — broadcast to `incident:{IncidentId}` only. Chat
+  channels are deliberately skipped: every comment, severity change, and role
+  assignment would otherwise become a Slack ping.
+- `ActionItemOverdue` — emitted by `ActionItemReminderService` once a day per
+  overdue item; channels-only (no SignalR surface yet).
 
 The `dashboard`-then-`incident:{id}` split for `IncidentStatusChanged` is
 deliberate: the dashboard view should never miss a status change because the
@@ -82,13 +90,22 @@ Broadcast is **best-effort, post-commit**:
 - Transactional consistency on write: the message and the state change either
   both land or neither does.
 - No duplicate broadcasts under DB-write failure — clients trust each event.
-- Slack/Teams adapters in a later change plug into the same `switch (msg.Type)`
-  path inside `BroadcastAsync`. The endpoint side does not change.
+- Channel fan-out is a separate post-commit step using `INotificationChannel`
+  implementations registered as a singleton collection. Adding a new channel
+  (PagerDuty, Discord, custom webhook) is one class plus one DI line; producers
+  and the switch in `BroadcastAsync` do not change. Each channel runs inside
+  `SafeSendAsync` — a single 5xx Slack response or hung Teams endpoint does not
+  block siblings or revert the mark-processed.
 
 **Minus**
 
 - Latency floor of ~500ms from the polling interval. Acceptable for the
   use-case; not a real-time bus.
+- Channel hydration costs one `SELECT incidents JOIN services` per processed
+  message because the outbox payload only carries `IncidentId`. Acceptable at
+  MVP throughput (one scoped DbContext per tick, projected via `AsNoTracking`);
+  if dispatch ever sees > ~100 msg/s we will inline the Service name and
+  severity into the outbox payload to remove the read.
 - Best-effort SignalR + post-commit means a transient broadcast drop is
   invisible to the server. Mitigated by client-side refetch; revisit if losses
   become observable.
