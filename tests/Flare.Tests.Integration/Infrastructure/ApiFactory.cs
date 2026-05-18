@@ -25,6 +25,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
 
     private readonly Dictionary<string, string?> _configOverrides = new();
     private bool _registerDispatcherAsSingleton;
+    private bool _registerReminderAsSingleton;
     private HttpMessageHandler? _slackHandler;
     private HttpMessageHandler? _teamsHandler;
     private bool _disposed;
@@ -67,6 +68,14 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
         // stripped (so no background tick races the assertion) and the test drives one
         // deterministic ProcessOnceAsync call.
         _registerDispatcherAsSingleton = true;
+        return this;
+    }
+
+    public ApiFactory WithReminderForManualTick()
+    {
+        // Same pattern as WithDispatcherForManualTick — used by reminder schedule tests
+        // that need to call internal ComputeNextDelayAsync / TickAsync deterministically.
+        _registerReminderAsSingleton = true;
         return this;
     }
 
@@ -113,6 +122,10 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
                 // Tests resolve via GetRequiredService<NotificationDispatcher>() and call
                 // internal ProcessOnceAsync directly — see InternalsVisibleTo in Infrastructure.csproj.
                 services.AddSingleton<NotificationDispatcher>();
+            }
+            if (_registerReminderAsSingleton)
+            {
+                services.AddSingleton<ActionItemReminderService>();
             }
 
             // Named-client builder actions accumulate across registrations. Clearing the

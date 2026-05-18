@@ -18,6 +18,12 @@ public sealed class ActionItemReminderService(
     // would never fire.
     internal static readonly TimeSpan Period = TimeSpan.FromHours(24);
 
+    // Floor between consecutive failed ticks. Without this, a permanent TickAsync failure
+    // (FK violation, schema regression, transient DB outage > 24h) would not advance the
+    // heartbeat watermark, ComputeNextDelayAsync would return Zero, and the loop would
+    // hammer the DB at zero delay until manual intervention.
+    internal static readonly TimeSpan FailureBackoff = TimeSpan.FromMinutes(15);
+
     internal const string HeartbeatType = "ReminderHeartbeat";
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -44,7 +50,12 @@ public sealed class ActionItemReminderService(
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                logger.LogWarning(ex, "ActionItemReminder tick failed");
+                logger.LogWarning(ex, "ActionItemReminder tick failed; backing off {Backoff}", FailureBackoff);
+                // Fixed backoff between failed ticks. Heartbeat was not written (SaveChanges
+                // threw inside TickAsync), so the next ComputeNextDelayAsync would return
+                // Zero — without this delay the loop would spin tightly on a permanent error.
+                try { await Task.Delay(FailureBackoff, stoppingToken); }
+                catch (OperationCanceledException) { return; }
             }
         }
     }
