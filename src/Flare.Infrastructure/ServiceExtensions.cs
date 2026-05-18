@@ -45,6 +45,7 @@ public static class ServiceExtensions
         services.AddHostedService<IngestionWorker>();
         services.AddHostedService<NotificationDispatcher>();
         services.AddHostedService<MetricsAggregator>();
+        services.AddHostedService<ActionItemReminderService>();
 
         return services;
     }
