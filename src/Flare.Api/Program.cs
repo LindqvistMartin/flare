@@ -48,6 +48,7 @@ builder.Services.AddOpenTelemetry()
         .AddAspNetCoreInstrumentation()
         .AddHttpClientInstrumentation()
         .AddRuntimeInstrumentation()
+        .AddMeter("Flare.Notifications")
         .AddPrometheusExporter()
         .AddOtlpExporter());
 

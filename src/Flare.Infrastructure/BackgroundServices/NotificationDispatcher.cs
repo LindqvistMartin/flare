@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using Flare.Infrastructure.Hubs;
 using Flare.Infrastructure.Notifications;
@@ -43,11 +44,15 @@ public sealed class NotificationDispatcher(
     // can drive one deterministic tick instead of racing against the 500ms poll loop.
     internal async Task ProcessOnceAsync(CancellationToken ct)
     {
+        using var activity = NotificationDiagnostics.ActivitySource.StartActivity("Dispatcher.Tick");
+
         await using var scope = scopeFactory.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<FlareDbContext>();
 
         var batch = await CommitBatchAsync(db, ct);
         if (batch.Count == 0) return;
+
+        activity?.SetTag("flare.batch_size", batch.Count);
 
         foreach (var msg in batch)
             await BroadcastAsync(msg, db, ct);
@@ -94,14 +99,40 @@ public sealed class NotificationDispatcher(
 
     private async Task BroadcastAsync(PendingBroadcast msg, FlareDbContext db, CancellationToken ct)
     {
+        using var activity = NotificationDiagnostics.ActivitySource.StartActivity("Dispatcher.Broadcast");
+        activity?.SetTag("flare.outbox.type", msg.Type);
+        activity?.SetTag("flare.outbox.id", msg.Id);
+
         Guid? incidentId = TryExtractIncidentId(msg.Payload);
 
         await BroadcastSignalRAsync(msg, incidentId, ct);
 
         var notification = await BuildNotificationAsync(msg, db, incidentId, ct);
         if (notification is not null)
+        {
             await FanOutToChannelsAsync(notification, ct);
+            NotificationDiagnostics.OutboxMessagesProcessed.Add(1,
+                new KeyValuePair<string, object?>("type", msg.Type),
+                new KeyValuePair<string, object?>("result", "dispatched"));
+        }
+        else if (IsChannelEligibleType(msg.Type))
+        {
+            // Type wanted to fan out but hydration failed — DispatcherDropped counter incremented
+            // already inside BuildNotificationAsync; mirror the outcome on the throughput counter.
+            NotificationDiagnostics.OutboxMessagesProcessed.Add(1,
+                new KeyValuePair<string, object?>("type", msg.Type),
+                new KeyValuePair<string, object?>("result", "dropped"));
+        }
+        else
+        {
+            NotificationDiagnostics.OutboxMessagesProcessed.Add(1,
+                new KeyValuePair<string, object?>("type", msg.Type),
+                new KeyValuePair<string, object?>("result", "signalr_only"));
+        }
     }
+
+    private static bool IsChannelEligibleType(string type) =>
+        type is "IncidentCreated" or "IncidentStatusChanged" or "ActionItemOverdue";
 
     private async Task BroadcastSignalRAsync(PendingBroadcast msg, Guid? incidentId, CancellationToken ct)
     {
@@ -147,9 +178,14 @@ public sealed class NotificationDispatcher(
                     // end of every tick. Not user-facing — no broadcast, no warning.
                     break;
                 default:
-                    logger.LogWarning(
-                        "Outbox message {Type} {Id} has no broadcast route; ignored",
+                    // Unknown type = audit signal, not a routine warning. Operator must know that
+                    // a producer is writing rows with no consumer, or that an old type slipped in
+                    // post-deploy and is being silently lost.
+                    logger.LogError(
+                        "Outbox message {Type} {Id} has no broadcast route; dropping with no consumer",
                         msg.Type, msg.Id);
+                    NotificationDiagnostics.DispatcherDropped.Add(1,
+                        new KeyValuePair<string, object?>("reason", "unknown_type"));
                     break;
             }
         }
@@ -200,9 +236,13 @@ public sealed class NotificationDispatcher(
             .FirstOrDefaultAsync(i => i.Id == incidentId, ct);
         if (incident is null)
         {
-            logger.LogWarning(
-                "Cannot hydrate notification for {Kind}: incident {Id} not found",
+            // Elevated from Warning: a notification has been silently lost AND the outbox row
+            // is already mark-processed, so there is no replay path. Operator alarm-worthy.
+            logger.LogError(
+                "Cannot hydrate notification for {Kind}: incident {Id} not found, message dropped",
                 kind, incidentId);
+            NotificationDiagnostics.DispatcherDropped.Add(1,
+                new KeyValuePair<string, object?>("reason", "incident_not_found"));
             return null;
         }
         if (incident.Service is null)
@@ -210,9 +250,11 @@ public sealed class NotificationDispatcher(
             // FK is non-nullable, so this only triggers if Include silently regresses (e.g. someone
             // splits the query). Skipping the channel send beats shipping "(unknown service)" to
             // operators in a chat preview.
-            logger.LogWarning(
-                "Cannot hydrate notification for {Kind}: incident {Id} has no Service navigation loaded",
+            logger.LogError(
+                "Cannot hydrate notification for {Kind}: incident {Id} has no Service navigation loaded, message dropped",
                 kind, incidentId);
+            NotificationDiagnostics.DispatcherDropped.Add(1,
+                new KeyValuePair<string, object?>("reason", "service_not_loaded"));
             return null;
         }
         return new NotificationMessage(
@@ -274,15 +316,31 @@ public sealed class NotificationDispatcher(
 
     private async Task SafeSendAsync(INotificationChannel channel, NotificationMessage message, CancellationToken ct)
     {
+        using var activity = NotificationDiagnostics.ActivitySource.StartActivity("Channel.Send");
+        activity?.SetTag("flare.channel", channel.Name);
+        activity?.SetTag("flare.notification.kind", message.Kind.ToString());
+
         try
         {
             await channel.SendAsync(message, ct);
+            NotificationDiagnostics.ChannelSends.Add(1,
+                new KeyValuePair<string, object?>("channel", channel.Name),
+                new KeyValuePair<string, object?>("result", "success"));
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             // Host shutdown — let the outer ExecuteAsync return gracefully. Outbox row stays
             // mark-processed; the in-flight broadcast is acceptably lost on graceful stop.
             throw;
+        }
+        catch (NotificationChannelException ex)
+        {
+            // Channel already logged a sanitized warning (no webhook URL leak); record the
+            // failure on the counter so operators see aggregate failure rates without grep.
+            activity?.SetStatus(ActivityStatusCode.Error, ex.OriginalExceptionType);
+            NotificationDiagnostics.ChannelSends.Add(1,
+                new KeyValuePair<string, object?>("channel", channel.Name),
+                new KeyValuePair<string, object?>("result", "transport_failure"));
         }
         catch (Exception ex)
         {
@@ -292,8 +350,12 @@ public sealed class NotificationDispatcher(
             // Post-commit semantics: the outbox row is already marked processed, so a channel
             // failure here is permanently lost from this side. Operators see it in logs and
             // recover via client refetch / out-of-band notification.
+            activity?.SetStatus(ActivityStatusCode.Error, ex.GetType().Name);
             logger.LogWarning(ex, "Notification channel {Name} failed for {Kind} of incident {IncidentId}",
                 channel.Name, message.Kind, message.IncidentId);
+            NotificationDiagnostics.ChannelSends.Add(1,
+                new KeyValuePair<string, object?>("channel", channel.Name),
+                new KeyValuePair<string, object?>("result", "error"));
         }
     }
 
