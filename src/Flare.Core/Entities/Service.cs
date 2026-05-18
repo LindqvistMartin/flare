@@ -14,9 +14,16 @@ public sealed class Service
 
     private Service() { }
 
+    // Same bound rationale as Incident.MaxTitleLength: admin-set field but still flows
+    // through notification channels, so a runaway name length must not amplify into per-tick
+    // megabyte allocations across the broadcast fan-out.
+    public const int MaxNameLength = 512;
+
     public Service(Guid teamId, string name, string description = "", string runbookBody = "")
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        if (name.Length > MaxNameLength)
+            throw new ArgumentException($"Name cannot exceed {MaxNameLength} characters.", nameof(name));
         Id = Guid.NewGuid();
         TeamId = teamId;
         Name = name;

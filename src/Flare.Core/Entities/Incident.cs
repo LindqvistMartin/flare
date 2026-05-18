@@ -38,10 +38,18 @@ public sealed class Incident
 
     private Incident() { }
 
+    // Hard upper bound on attacker-supplied title size. Slack/Teams reject payloads above
+    // their own per-message limits anyway, but capping at the domain boundary protects
+    // against a megabyte-sized POST body amplifying through the broadcast-concurrency
+    // fan-out (10 × N-MB JSON allocations per tick).
+    public const int MaxTitleLength = 512;
+
     public Incident(Guid serviceId, string title, IncidentSeverity severity)
     {
         if (serviceId == Guid.Empty) throw new ArgumentException("ServiceId cannot be empty.", nameof(serviceId));
         ArgumentException.ThrowIfNullOrWhiteSpace(title);
+        if (title.Length > MaxTitleLength)
+            throw new ArgumentException($"Title cannot exceed {MaxTitleLength} characters.", nameof(title));
         Id = Guid.NewGuid();
         ServiceId = serviceId;
         Title = title;

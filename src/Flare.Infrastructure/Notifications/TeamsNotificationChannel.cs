@@ -34,9 +34,15 @@ public sealed class TeamsNotificationChannel(
         {
             throw;
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or System.IO.IOException)
+        catch (Exception ex) when (ex
+            is HttpRequestException
+            or TaskCanceledException
+            or System.IO.IOException
+            or System.Net.Sockets.SocketException
+            or System.Security.Authentication.AuthenticationException)
         {
-            // See SlackNotificationChannel for the URL-scrubbing rationale.
+            // See SlackNotificationChannel for the URL-scrubbing rationale and the SocketException
+            // / AuthenticationException widening.
             logger.LogWarning("Teams webhook transport failure for {Kind} of incident {IncidentId}: {ExceptionType}",
                 message.Kind, message.IncidentId, ex.GetType().Name);
             throw new NotificationChannelException(Name, ex.GetType().Name);

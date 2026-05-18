@@ -35,12 +35,20 @@ public sealed class SlackNotificationChannel(
             // Host shutdown — surface to SafeSendAsync which handles it explicitly.
             throw;
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or System.IO.IOException)
+        catch (Exception ex) when (ex
+            is HttpRequestException
+            or TaskCanceledException
+            or System.IO.IOException
+            or System.Net.Sockets.SocketException
+            or System.Security.Authentication.AuthenticationException)
         {
             // Crucial: the exception's Message frequently includes the request URI, and the
             // Slack incoming-webhook URL IS the bearer credential. Re-throwing the original
             // exception would log "Connection refused (hooks.slack.com/services/T0/B0/SECRET)"
             // into the central log aggregator. Strip to safe metadata only.
+            // SocketException + AuthenticationException added explicitly because on certain
+            // cold-start TLS-validation paths they can escape outside the HttpRequestException
+            // wrapper and reach the dispatcher's generic catch (which logs ex.ToString()).
             logger.LogWarning("Slack webhook transport failure for {Kind} of incident {IncidentId}: {ExceptionType}",
                 message.Kind, message.IncidentId, ex.GetType().Name);
             throw new NotificationChannelException(Name, ex.GetType().Name);
