@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using Flare.Core.Entities;
 
@@ -10,7 +11,11 @@ internal static class SlackPayloadBuilder
         var emoji = SeverityEmoji(message.Severity);
         var headerText = $"{emoji} {message.Severity} - {message.ServiceName}";
         var bodyText = BuildBodyText(message);
-        var contextText = $"Incident `{ShortId(message.IncidentId)}` - {message.OccurredAt:yyyy-MM-dd HH:mm} UTC";
+        // InvariantCulture: Slack is an English-only UI and hosts in non-Western cultures
+        // (ar-SA, fa-IR, th-TH) otherwise render the year and digits in their native script,
+        // which both breaks Slack's filename heuristics and looks like a bug to operators.
+        var timestamp = message.OccurredAt.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
+        var contextText = $"Incident `{ShortId(message.IncidentId)}` - {timestamp} UTC";
         var fallback = BuildFallback(message);
 
         var payload = new

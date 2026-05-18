@@ -200,13 +200,23 @@ public sealed class NotificationDispatcher(
                 kind, incidentId);
             return null;
         }
+        if (incident.Service is null)
+        {
+            // FK is non-nullable, so this only triggers if Include silently regresses (e.g. someone
+            // splits the query). Skipping the channel send beats shipping "(unknown service)" to
+            // operators in a chat preview.
+            logger.LogWarning(
+                "Cannot hydrate notification for {Kind}: incident {Id} has no Service navigation loaded",
+                kind, incidentId);
+            return null;
+        }
         return new NotificationMessage(
             Kind: kind,
             IncidentId: incident.Id,
             Title: titleOverride ?? incident.Title,
             Severity: incident.Severity,
             Status: incident.Status,
-            ServiceName: incident.Service?.Name ?? "(unknown service)",
+            ServiceName: incident.Service.Name,
             OccurredAt: DateTime.UtcNow,
             Detail: detail);
     }

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using Flare.Core.Entities;
 
@@ -36,8 +37,9 @@ internal static class TeamsPayloadBuilder
     {
         NotificationKind.ActionItemOverdue =>
             message.Detail ?? "Action item past its due date.",
+        // InvariantCulture: see SlackPayloadBuilder for the rationale.
         _ =>
-            $"**{message.Title}**\n\nStatus: {message.Status}\nOccurred: {message.OccurredAt:yyyy-MM-dd HH:mm} UTC"
+            $"**{message.Title}**\n\nStatus: {message.Status}\nOccurred: {message.OccurredAt.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)} UTC"
     };
 
     private static string SeverityHex(IncidentSeverity severity) => severity switch
