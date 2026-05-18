@@ -81,6 +81,9 @@ public sealed class ActionItemReminderService(
 
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
 
+        // Required-navigation INNER JOIN guarantees Postmortem is loaded for every returned
+        // row, so the previous defensive `Where(a => a.Postmortem != null)` filter was a
+        // misleading no-op (orphans would be dropped by the join, not by the predicate).
         var overdue = await db.ActionItems
             .AsNoTracking()
             .Include(a => a.Postmortem)

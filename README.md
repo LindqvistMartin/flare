@@ -6,7 +6,7 @@
 [![.NET](https://img.shields.io/badge/.NET-10-purple.svg)](https://dotnet.microsoft.com)
 [![React](https://img.shields.io/badge/React-18-61dafb.svg)](https://react.dev)
 [![CI](https://github.com/LindqvistMartin/flare/actions/workflows/ci.yml/badge.svg)](https://github.com/LindqvistMartin/flare/actions)
-[![Tests](https://img.shields.io/badge/tests-97%20passing-brightgreen.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-123%20passing-brightgreen.svg)](#)
 
 ## Architecture
 
@@ -80,14 +80,24 @@ matview SQL stays fast and independent of event payload format.
   `MetricsAggregator`.
 - **Outbox dispatch** — `NotificationDispatcher` polls with
   `FOR UPDATE SKIP LOCKED`, marks rows processed, commits, *then* broadcasts to
-  SignalR groups and to configured Slack / Teams webhooks. At-least-once on DB,
-  at-most-once on the wire — see ADR-003 for the rationale.
-- **Slack & Teams channels** — pluggable via `INotificationChannel`; configured
-  through `Notifications:Slack:WebhookUrl` and `Notifications:Teams:WebhookUrl`.
-  Empty URL = silent skip, so Flare boots without any chat integration.
-- **Action item reminders** — `ActionItemReminderService` runs daily, emitting an
-  `ActionItemOverdue` outbox row per overdue action item; the dispatcher fans
-  these out to chat channels.
+  SignalR groups and to configured Slack / Teams webhooks. Within-batch fan-out
+  runs concurrently (cap 10) so one slow webhook does not wedge sibling
+  messages. At-least-once on DB, at-most-once on the wire — see ADR-003.
+- **Slack & Teams channels** — pluggable via `INotificationChannel`. Webhook URLs
+  are validated against an HTTPS host allowlist (`hooks.slack.com`,
+  `*.webhook.office.com`) at startup; HTTP, loopback, and private/link-local
+  targets are refused (SSRF guard). Empty URL = silent skip.
+- **Action item reminders** — `ActionItemReminderService` runs every 24 hours
+  since the previous successful run (schedule is persisted as a
+  `ReminderHeartbeat` outbox row, so it survives process restart).
+- **Outbox retention** — `OutboxJanitorService` sweeps every 6 hours, deleting
+  processed messages older than 30 days; bounds storage and the historical PII
+  window for any compliance audit.
+- **Notification metrics & traces** — `flare_notification_channel_sends_total`,
+  `flare_outbox_messages_processed_total`, and `flare_dispatcher_dropped_total`
+  counters on the `Flare.Notifications` meter; `Flare.NotificationDispatcher`
+  ActivitySource spans complete the Jaeger trace from POST /incidents through
+  the channel POST.
 - **Realtime UI plumbing** — SignalR hub at `/hubs/flare` with `dashboard` and
   `incident:{id}` groups.
 - **Idempotent POSTs** — `Idempotency-Key` header deduplicates write requests for

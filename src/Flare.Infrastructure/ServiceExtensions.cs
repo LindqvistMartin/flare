@@ -64,6 +64,7 @@ public static class ServiceExtensions
         services.AddHostedService<NotificationDispatcher>();
         services.AddHostedService<MetricsAggregator>();
         services.AddHostedService<ActionItemReminderService>();
+        services.AddHostedService<OutboxJanitorService>();
 
         return services;
     }

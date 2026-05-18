@@ -39,6 +39,12 @@ public sealed class NotificationDispatcher(
         }
     }
 
+    // Cap on concurrent broadcasts inside a single batch. Sequential 50 × 10s timeout
+    // under a Slack/Teams outage wedged the dispatcher for ~8 minutes per tick; parallel
+    // fan-out at cap=10 caps that wedge near ~10s while staying well under the default
+    // SocketsHttpHandler.MaxConnectionsPerServer of 100.
+    private const int BroadcastConcurrency = 10;
+
     // Single tick of the dispatcher: claim a batch under FOR UPDATE SKIP LOCKED, commit
     // mark-processed, then broadcast post-commit. Exposed as internal so integration tests
     // can drive one deterministic tick instead of racing against the 500ms poll loop.
@@ -46,16 +52,38 @@ public sealed class NotificationDispatcher(
     {
         using var activity = NotificationDiagnostics.ActivitySource.StartActivity("Dispatcher.Tick");
 
-        await using var scope = scopeFactory.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<FlareDbContext>();
+        IReadOnlyList<PendingBroadcast> batch;
+        await using (var batchScope = scopeFactory.CreateAsyncScope())
+        {
+            var batchDb = batchScope.ServiceProvider.GetRequiredService<FlareDbContext>();
+            batch = await CommitBatchAsync(batchDb, ct);
+        }
 
-        var batch = await CommitBatchAsync(db, ct);
         if (batch.Count == 0) return;
 
         activity?.SetTag("flare.batch_size", batch.Count);
 
-        foreach (var msg in batch)
+        // Concurrent broadcast with a semaphore cap. Each task creates its own DbContext
+        // scope because DbContext is not thread-safe — two concurrent BroadcastAsync calls
+        // sharing one context would throw "A second operation was started on this context".
+        using var concurrency = new SemaphoreSlim(BroadcastConcurrency);
+        var tasks = batch.Select(msg => BroadcastWithScopeAsync(msg, concurrency, ct));
+        await Task.WhenAll(tasks);
+    }
+
+    private async Task BroadcastWithScopeAsync(PendingBroadcast msg, SemaphoreSlim concurrency, CancellationToken ct)
+    {
+        await concurrency.WaitAsync(ct);
+        try
+        {
+            await using var scope = scopeFactory.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<FlareDbContext>();
             await BroadcastAsync(msg, db, ct);
+        }
+        finally
+        {
+            concurrency.Release();
+        }
     }
 
     private async Task<IReadOnlyList<PendingBroadcast>> CommitBatchAsync(FlareDbContext db, CancellationToken ct)

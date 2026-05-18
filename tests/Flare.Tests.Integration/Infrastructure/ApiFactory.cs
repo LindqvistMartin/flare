@@ -106,6 +106,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
             RemoveHosted<NotificationDispatcher>(services);
             RemoveHosted<MetricsAggregator>(services);
             RemoveHosted<ActionItemReminderService>(services);
+            RemoveHosted<OutboxJanitorService>(services);
 
             if (_registerDispatcherAsSingleton)
             {
