@@ -24,15 +24,38 @@ public sealed class SlackNotificationChannel(
         var client = httpClientFactory.CreateClient(HttpClientName);
 
         using var content = new StringContent(payload, Encoding.UTF8, "application/json");
-        using var response = await client.PostAsync(options.Value.Slack.WebhookUrl, content, cancellationToken);
 
+        HttpResponseMessage response;
+        try
+        {
+            response = await client.PostAsync(options.Value.Slack.WebhookUrl, content, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Host shutdown — surface to SafeSendAsync which handles it explicitly.
+            throw;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or System.IO.IOException)
+        {
+            // Crucial: the exception's Message frequently includes the request URI, and the
+            // Slack incoming-webhook URL IS the bearer credential. Re-throwing the original
+            // exception would log "Connection refused (hooks.slack.com/services/T0/B0/SECRET)"
+            // into the central log aggregator. Strip to safe metadata only.
+            logger.LogWarning("Slack webhook transport failure for {Kind} of incident {IncidentId}: {ExceptionType}",
+                message.Kind, message.IncidentId, ex.GetType().Name);
+            throw new NotificationChannelException(Name, ex.GetType().Name);
+        }
+
+        using var _ = response;
         if (!response.IsSuccessStatusCode)
         {
-            // Don't throw — dispatcher's SafeSendAsync wrapper logs and isolates per-channel failure.
-            // Slack returns 4xx for malformed payloads; surfacing the status keeps the warning actionable.
+            // Don't throw — dispatcher's SafeSendAsync wrapper logs and isolates per-channel
+            // failure. Slack returns 4xx for malformed payloads and 429 for rate limits.
+            // Surface Retry-After when present so operators see why we lost messages.
+            var retryAfter = response.Headers.RetryAfter?.ToString();
             logger.LogWarning(
-                "Slack webhook returned {StatusCode} for {Kind} of incident {IncidentId}",
-                (int)response.StatusCode, message.Kind, message.IncidentId);
+                "Slack webhook returned {StatusCode} for {Kind} of incident {IncidentId} (retry-after: {RetryAfter})",
+                (int)response.StatusCode, message.Kind, message.IncidentId, retryAfter ?? "n/a");
         }
     }
 }

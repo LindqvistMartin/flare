@@ -24,13 +24,31 @@ public sealed class TeamsNotificationChannel(
         var client = httpClientFactory.CreateClient(HttpClientName);
 
         using var content = new StringContent(payload, Encoding.UTF8, "application/json");
-        using var response = await client.PostAsync(options.Value.Teams.WebhookUrl, content, cancellationToken);
 
+        HttpResponseMessage response;
+        try
+        {
+            response = await client.PostAsync(options.Value.Teams.WebhookUrl, content, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or System.IO.IOException)
+        {
+            // See SlackNotificationChannel for the URL-scrubbing rationale.
+            logger.LogWarning("Teams webhook transport failure for {Kind} of incident {IncidentId}: {ExceptionType}",
+                message.Kind, message.IncidentId, ex.GetType().Name);
+            throw new NotificationChannelException(Name, ex.GetType().Name);
+        }
+
+        using var _ = response;
         if (!response.IsSuccessStatusCode)
         {
+            var retryAfter = response.Headers.RetryAfter?.ToString();
             logger.LogWarning(
-                "Teams webhook returned {StatusCode} for {Kind} of incident {IncidentId}",
-                (int)response.StatusCode, message.Kind, message.IncidentId);
+                "Teams webhook returned {StatusCode} for {Kind} of incident {IncidentId} (retry-after: {RetryAfter})",
+                (int)response.StatusCode, message.Kind, message.IncidentId, retryAfter ?? "n/a");
         }
     }
 }
