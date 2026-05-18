@@ -6,7 +6,7 @@ using Microsoft.Extensions.Logging;
 
 namespace Flare.Infrastructure.BackgroundServices;
 
-// Outbox.Payload preserves the full notification body forever after MarkProcessed —
+// Outbox.Payload preserves the full notification body forever after MarkProcessed --
 // including user-set titles, OwnerIds, and action-item content. Without a retention
 // sweep these rows accumulate indefinitely in DB dumps / replicas / backups. Daily
 // trim keeps storage bounded and keeps the historical PII window finite for any
@@ -46,9 +46,22 @@ public sealed class OutboxJanitorService(
         await using var scope = scopeFactory.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<FlareDbContext>();
 
+        // Preserve the most recent ReminderHeartbeat row regardless of age. ActionItemReminderService
+        // uses it as the schedule watermark via ComputeNextDelayAsync; deleting the only heartbeat
+        // after a >30-day outage would silently reset the schedule and reminders would not fire
+        // for another full Period after recovery.
+        var latestHeartbeatId = await db.OutboxMessages
+            .AsNoTracking()
+            .Where(m => m.Type == ActionItemReminderService.HeartbeatType)
+            .OrderByDescending(m => m.CreatedAt)
+            .Select(m => (Guid?)m.Id)
+            .FirstOrDefaultAsync(ct);
+
         var cutoff = DateTime.UtcNow - Retention;
         var deleted = await db.OutboxMessages
-            .Where(m => m.ProcessedAt != null && m.ProcessedAt < cutoff)
+            .Where(m => m.ProcessedAt != null
+                     && m.ProcessedAt < cutoff
+                     && (latestHeartbeatId == null || m.Id != latestHeartbeatId))
             .ExecuteDeleteAsync(ct);
 
         if (deleted > 0)
