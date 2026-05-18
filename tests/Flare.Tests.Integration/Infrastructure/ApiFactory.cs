@@ -9,6 +9,8 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Http;
+using Microsoft.Extensions.Options;
 using Testcontainers.PostgreSql;
 using Xunit;
 
@@ -25,17 +27,29 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
     private bool _registerDispatcherAsSingleton;
     private HttpMessageHandler? _slackHandler;
     private HttpMessageHandler? _teamsHandler;
+    private bool _disposed;
 
     public async Task InitializeAsync()
     {
         await _pg.StartAsync();
-        // Force lazy host build, then run migrations explicitly — relying on Program.cs'
-        // top-level MigrateAsync via the WebApplicationFactory codepath is racy because the
-        // factory short-circuits app.Run().
-        _ = Server;
-        using var scope = Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<FlareDbContext>();
-        await db.Database.MigrateAsync();
+        try
+        {
+            // Force lazy host build, then run migrations explicitly — relying on Program.cs'
+            // top-level MigrateAsync via the WebApplicationFactory codepath is racy because the
+            // factory short-circuits app.Run().
+            _ = Server;
+            using var scope = Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<FlareDbContext>();
+            await db.Database.MigrateAsync();
+        }
+        catch
+        {
+            // Host build or migration failure must not leak the container — without this
+            // guard a bad config override or migration regression strands a Postgres
+            // container per failed test run in CI.
+            await _pg.DisposeAsync();
+            throw;
+        }
     }
 
     // Fluent opt-ins: chain before any property that triggers host build (Server, CreateClient,
@@ -100,13 +114,20 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
                 services.AddSingleton<NotificationDispatcher>();
             }
 
+            // Named-client builder actions accumulate across registrations. Clearing the
+            // production builder list before re-registering pins the test handler as the
+            // primary one regardless of SDK version or registration order quirks.
             if (_slackHandler is not null)
             {
+                services.Configure<HttpClientFactoryOptions>(SlackNotificationChannel.HttpClientName,
+                    o => o.HttpMessageHandlerBuilderActions.Clear());
                 services.AddHttpClient(SlackNotificationChannel.HttpClientName)
                     .ConfigurePrimaryHttpMessageHandler(() => _slackHandler);
             }
             if (_teamsHandler is not null)
             {
+                services.Configure<HttpClientFactoryOptions>(TeamsNotificationChannel.HttpClientName,
+                    o => o.HttpMessageHandlerBuilderActions.Clear());
                 services.AddHttpClient(TeamsNotificationChannel.HttpClientName)
                     .ConfigurePrimaryHttpMessageHandler(() => _teamsHandler);
             }
@@ -130,6 +151,12 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
 
     public override async ValueTask DisposeAsync()
     {
+        // Re-entrancy guard: xUnit's IAsyncLifetime.DisposeAsync and `await using` both call
+        // DisposeAsync, so we land here twice for every test. base.DisposeAsync is not
+        // documented as idempotent across .NET versions; skipping on the second pass avoids
+        // noisy teardown errors when DbContext pool or telemetry exporters flush.
+        if (_disposed) return;
+        _disposed = true;
         // Tear down the host first so open Npgsql connections close cleanly before the
         // container goes away. Reversing the order leaks connections and produces noisy
         // teardown errors when DbContext pool or telemetry exporters flush.
