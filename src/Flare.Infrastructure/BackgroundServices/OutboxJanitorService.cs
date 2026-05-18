@@ -18,6 +18,13 @@ public sealed class OutboxJanitorService(
     internal static readonly TimeSpan SweepInterval = TimeSpan.FromHours(6);
     internal static readonly TimeSpan Retention = TimeSpan.FromDays(30);
 
+    // Chunk size bounds per-statement WAL pressure. The first sweep after deployment
+    // against a multi-month backlog can otherwise generate GB of WAL in one transaction
+    // (saturating replication and autovacuum). 10K rows per chunk is a Postgres-friendly
+    // ceiling; ~100ms between chunks lets concurrent traffic make progress.
+    internal const int DeleteChunkSize = 10_000;
+    internal static readonly TimeSpan ChunkPause = TimeSpan.FromMilliseconds(100);
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         // Initial delay so the first sweep does not race the dispatcher's first batch
@@ -58,14 +65,25 @@ public sealed class OutboxJanitorService(
             .FirstOrDefaultAsync(ct);
 
         var cutoff = DateTime.UtcNow - Retention;
-        var deleted = await db.OutboxMessages
-            .Where(m => m.ProcessedAt != null
-                     && m.ProcessedAt < cutoff
-                     && (latestHeartbeatId == null || m.Id != latestHeartbeatId))
-            .ExecuteDeleteAsync(ct);
+        long totalDeleted = 0;
+        while (!ct.IsCancellationRequested)
+        {
+            var deletedThisChunk = await db.OutboxMessages
+                .Where(m => m.ProcessedAt != null
+                         && m.ProcessedAt < cutoff
+                         && (latestHeartbeatId == null || m.Id != latestHeartbeatId))
+                .Take(DeleteChunkSize)
+                .ExecuteDeleteAsync(ct);
 
-        if (deleted > 0)
+            totalDeleted += deletedThisChunk;
+            if (deletedThisChunk < DeleteChunkSize) break;
+
+            try { await Task.Delay(ChunkPause, ct); }
+            catch (OperationCanceledException) { break; }
+        }
+
+        if (totalDeleted > 0)
             logger.LogInformation("OutboxJanitor: deleted {Count} processed messages older than {Days} days",
-                deleted, Retention.TotalDays);
+                totalDeleted, Retention.TotalDays);
     }
 }

@@ -16,5 +16,12 @@ internal sealed class OutboxMessageConfiguration : IEntityTypeConfiguration<Outb
         builder.HasIndex(x => x.CreatedAt)
             .HasDatabaseName("IX_OutboxMessages_Unprocessed")
             .HasFilter("""("ProcessedAt" IS NULL)""");
+
+        // Composite index used by both ActionItemReminderService.ComputeNextDelayAsync
+        // (latest heartbeat lookup) and OutboxJanitorService.SweepAsync (latest heartbeat
+        // preservation + processed-and-old delete plan). Without it, both queries become
+        // sequential scans once the table grows past ~100K rows.
+        builder.HasIndex(x => new { x.Type, x.CreatedAt })
+            .HasDatabaseName("IX_OutboxMessages_Type_CreatedAt");
     }
 }
