@@ -43,7 +43,8 @@ A `NotificationDispatcher` `BackgroundService` polls `"OutboxMessages"` every
 4. **After** the transaction commits, broadcast each message via
    `IHubContext<FlareHub>`.
 
-Four `Type` values are produced:
+Five `Type` values are produced (canonical strings in
+`Flare.Core.Entities.OutboxMessageTypes`):
 
 - `IncidentCreated` — broadcast to SignalR group `dashboard`; fans out to chat
   channels.
@@ -55,6 +56,13 @@ Four `Type` values are produced:
   assignment would otherwise become a Slack ping.
 - `ActionItemOverdue` — emitted by `ActionItemReminderService` once a day per
   overdue item; channels-only (no SignalR surface yet).
+- `ReminderHeartbeat` — internal schedule watermark written by
+  `ActionItemReminderService` at the end of every successful tick. Dispatcher
+  recognizes the type and silently skips broadcast (no SignalR, no channels,
+  no DispatcherDropped counter). Read by `ComputeNextDelayAsync` on the next
+  iteration so the 24h cadence survives process restarts. Purged by
+  `OutboxJanitorService` like any other processed row, except the most recent
+  heartbeat is preserved regardless of age.
 
 The `dashboard`-then-`incident:{id}` split for `IncidentStatusChanged` is
 deliberate: the dashboard view should never miss a status change because the
@@ -173,10 +181,17 @@ content).
   top. The dispatcher is at-least-once-on-DB / at-most-once-on-wire, never
   in-order. Frontend handlers must be tolerant — each payload carries the
   `IncidentId` and is independently meaningful.
+- **Channel-down still wedges briefly.** Within-batch concurrency caps at 10,
+  so 50 messages × 10-second timeout = ~50 seconds per tick under a full outage
+  rather than 500 seconds. Acceptable for MVP; further reduction needs a
+  per-channel circuit breaker.
+
+## Roadmap (deferred, not consequences of this decision)
+
 - **No broadcast for `RoleAssigned` yet.** `POST /api/v1/incidents/{id}/roles`
   writes an `IncidentEvent` but no outbox row, so an `incident:{id}` subscriber
-  only learns about role changes on the next refetch. MVP-acceptable; will
-  close together with the frontend timeline that consumes it.
+  only learns about role changes on the next refetch. Will close together with
+  the frontend timeline that consumes it.
 - **No hub auth.** `FlareHub.JoinIncident(Guid)` accepts any caller. Acceptable
   while authentication is deferred (see project concept's scope guards);
   revisit when auth lands.
@@ -190,10 +205,6 @@ content).
   by the time the channel runs — there is no requeue. A storm of 429s loses
   notifications. Mitigation today is the metrics counter; a real retry table
   is roadmap.
-- **Channel-down still wedges briefly.** Within-batch concurrency caps at 10,
-  so 50 messages × 10-second timeout = ~50 seconds per tick under a full outage
-  rather than 500 seconds. Acceptable for MVP; further reduction needs a
-  per-channel circuit breaker.
 - Test-mode telemetry: OpenTelemetry OTLP exporter will attempt to connect to
   `localhost:4317` from the integration test host. Out of scope here; will
   silence in a later change if the noise becomes load-bearing.

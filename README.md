@@ -81,15 +81,20 @@ matview SQL stays fast and independent of event payload format.
 - **Outbox dispatch** — `NotificationDispatcher` polls with
   `FOR UPDATE SKIP LOCKED`, marks rows processed, commits, *then* broadcasts to
   SignalR groups and to configured Slack / Teams webhooks. Within-batch fan-out
-  runs concurrently (cap 10) so one slow webhook does not wedge sibling
-  messages. At-least-once on DB, at-most-once on the wire — see ADR-003.
+  runs concurrently (cap 10) on per-message DbContext scopes so one slow
+  webhook does not wedge sibling messages. At-least-once on DB, at-most-once
+  on the wire — see ADR-003.
 - **Slack & Teams channels** — pluggable via `INotificationChannel`. Webhook URLs
   are validated against an HTTPS host allowlist (`hooks.slack.com`,
-  `*.webhook.office.com`) at startup; HTTP, loopback, and private/link-local
-  targets are refused (SSRF guard). Empty URL = silent skip.
+  `*.webhook.office.com`) at startup via `ValidateOnStart` — a misconfigured
+  webhook fails the boot loudly instead of silently exfiltrating payloads.
+  HTTP, loopback, and private/link-local targets are refused (SSRF guard).
+  Empty URL = silent skip.
 - **Action item reminders** — `ActionItemReminderService` runs every 24 hours
   since the previous successful run (schedule is persisted as a
-  `ReminderHeartbeat` outbox row, so it survives process restart).
+  `ReminderHeartbeat` outbox row, so it survives process restart). A failed
+  tick backs off 15 minutes before retry to avoid hammering the DB on a
+  permanent error.
 - **Outbox retention** — `OutboxJanitorService` sweeps every 6 hours, deleting
   processed messages older than 30 days; bounds storage and the historical PII
   window for any compliance audit.
