@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using Flare.Core.Entities;
 using Flare.Infrastructure.Hubs;
 using Flare.Infrastructure.Notifications;
 using Flare.Infrastructure.Persistence;
@@ -160,7 +161,7 @@ public sealed class NotificationDispatcher(
     }
 
     private static bool IsChannelEligibleType(string type) =>
-        type is "IncidentCreated" or "IncidentStatusChanged" or "ActionItemOverdue";
+        type is OutboxMessageTypes.IncidentCreated or OutboxMessageTypes.IncidentStatusChanged or OutboxMessageTypes.ActionItemOverdue;
 
     private async Task BroadcastSignalRAsync(PendingBroadcast msg, Guid? incidentId, CancellationToken ct)
     {
@@ -168,28 +169,28 @@ public sealed class NotificationDispatcher(
         {
             switch (msg.Type)
             {
-                case "IncidentCreated":
+                case OutboxMessageTypes.IncidentCreated:
                     await hub.Clients.Group("dashboard")
-                        .SendAsync("IncidentCreated", msg.Payload, ct);
+                        .SendAsync(OutboxMessageTypes.IncidentCreated, msg.Payload, ct);
                     break;
-                case "IncidentStatusChanged":
+                case OutboxMessageTypes.IncidentStatusChanged:
                     // Dashboard always sees status changes — incident-scoped broadcast is
                     // best-effort because the IncidentId may be malformed.
                     await hub.Clients.Group("dashboard")
-                        .SendAsync("IncidentStatusChanged", msg.Payload, ct);
+                        .SendAsync(OutboxMessageTypes.IncidentStatusChanged, msg.Payload, ct);
                     if (incidentId is { } sid)
                         await hub.Clients.Group($"incident:{sid}")
-                            .SendAsync("IncidentStatusChanged", msg.Payload, ct);
+                            .SendAsync(OutboxMessageTypes.IncidentStatusChanged, msg.Payload, ct);
                     else
                         logger.LogWarning(
                             "Outbox message {Type} {Id} has no IncidentId; incident-scoped broadcast skipped",
                             msg.Type, msg.Id);
                     break;
-                case "IncidentEventAdded":
+                case OutboxMessageTypes.IncidentEventAdded:
                     if (incidentId is { } eid)
                     {
                         await hub.Clients.Group($"incident:{eid}")
-                            .SendAsync("IncidentEventAdded", msg.Payload, ct);
+                            .SendAsync(OutboxMessageTypes.IncidentEventAdded, msg.Payload, ct);
                     }
                     else
                     {
@@ -198,10 +199,10 @@ public sealed class NotificationDispatcher(
                             msg.Type, msg.Id);
                     }
                     break;
-                case "ActionItemOverdue":
+                case OutboxMessageTypes.ActionItemOverdue:
                     // Channels only — no realtime UI surface for action item reminders yet.
                     break;
-                case "ReminderHeartbeat":
+                case OutboxMessageTypes.ReminderHeartbeat:
                     // Internal schedule watermark written by ActionItemReminderService at the
                     // end of every tick. Not user-facing — no broadcast, no warning.
                     break;
@@ -235,11 +236,11 @@ public sealed class NotificationDispatcher(
 
         switch (msg.Type)
         {
-            case "IncidentCreated":
+            case OutboxMessageTypes.IncidentCreated:
                 return await HydrateIncidentAsync(db, id, NotificationKind.IncidentCreated, detail: null, ct);
-            case "IncidentStatusChanged":
+            case OutboxMessageTypes.IncidentStatusChanged:
                 return await HydrateIncidentAsync(db, id, NotificationKind.IncidentStatusChanged, detail: null, ct);
-            case "ActionItemOverdue":
+            case OutboxMessageTypes.ActionItemOverdue:
                 var (title, detail) = ParseActionItemPayload(msg.Payload);
                 return await HydrateIncidentAsync(db, id, NotificationKind.ActionItemOverdue, detail, ct, titleOverride: title);
             // IncidentEventAdded, ReminderHeartbeat, and unknown types do not surface in

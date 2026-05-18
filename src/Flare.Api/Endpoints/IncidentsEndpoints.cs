@@ -55,7 +55,7 @@ public static class IncidentsEndpoints
             var evt = new IncidentEvent(incident.Id, IncidentEventType.Created,
                 JsonSerializer.Serialize(new { req.Title, Severity = severity.ToString() }), actorId: null);
             var outbox = new OutboxMessage(
-                "IncidentCreated",
+                OutboxMessageTypes.IncidentCreated,
                 JsonSerializer.Serialize(new { IncidentId = incident.Id, Source = "manual" }));
 
             db.Incidents.Add(incident);
@@ -98,7 +98,7 @@ public static class IncidentsEndpoints
                 JsonSerializer.Serialize(new { To = next.ToString() }), actorId: null);
             db.IncidentEvents.Add(evt);
 
-            var outbox = new OutboxMessage("IncidentStatusChanged",
+            var outbox = new OutboxMessage(OutboxMessageTypes.IncidentStatusChanged,
                 JsonSerializer.Serialize(new { IncidentId = incident.Id, To = next.ToString() }));
             db.OutboxMessages.Add(outbox);
 
@@ -159,7 +159,7 @@ public static class IncidentsEndpoints
 
             var evt = new IncidentEvent(incident.Id, eventType, req.Payload, actorId: null);
             var outbox = new OutboxMessage(
-                "IncidentEventAdded",
+                OutboxMessageTypes.IncidentEventAdded,
                 JsonSerializer.Serialize(new { IncidentId = id, EventId = evt.Id, Type = eventType.ToString() }));
 
             db.IncidentEvents.Add(evt);

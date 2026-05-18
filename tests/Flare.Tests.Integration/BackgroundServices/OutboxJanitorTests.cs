@@ -25,9 +25,9 @@ public sealed class OutboxJanitorTests(ApiFactory _)
         await factory.CleanAsync();
 
         await SeedAsync(factory,
-            ("IncidentCreated", processedAt: DateTime.UtcNow - TimeSpan.FromDays(31)),
-            ("IncidentCreated", processedAt: DateTime.UtcNow - TimeSpan.FromDays(31)),
-            ("IncidentCreated", processedAt: DateTime.UtcNow - TimeSpan.FromDays(29)));
+            (OutboxMessageTypes.IncidentCreated, processedAt: DateTime.UtcNow - TimeSpan.FromDays(31)),
+            (OutboxMessageTypes.IncidentCreated, processedAt: DateTime.UtcNow - TimeSpan.FromDays(31)),
+            (OutboxMessageTypes.IncidentCreated, processedAt: DateTime.UtcNow - TimeSpan.FromDays(29)));
 
         await RunSweepAsync(factory);
 
@@ -45,8 +45,8 @@ public sealed class OutboxJanitorTests(ApiFactory _)
         await factory.CleanAsync();
 
         await SeedAsync(factory,
-            ("IncidentCreated", processedAt: null, createdAt: DateTime.UtcNow - TimeSpan.FromDays(60)),
-            ("IncidentCreated", processedAt: DateTime.UtcNow - TimeSpan.FromDays(31), createdAt: null));
+            (OutboxMessageTypes.IncidentCreated, processedAt: null, createdAt: DateTime.UtcNow - TimeSpan.FromDays(60)),
+            (OutboxMessageTypes.IncidentCreated, processedAt: DateTime.UtcNow - TimeSpan.FromDays(31), createdAt: null));
 
         await RunSweepAsync(factory);
 

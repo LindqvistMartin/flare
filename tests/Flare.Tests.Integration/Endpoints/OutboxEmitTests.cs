@@ -35,7 +35,7 @@ public sealed class OutboxEmitTests(ApiFactory factory) : IAsyncLifetime
         var db = scope.ServiceProvider.GetRequiredService<FlareDbContext>();
         var outbox = await db.OutboxMessages
             .AsNoTracking()
-            .Where(o => o.Type == "IncidentCreated")
+            .Where(o => o.Type == OutboxMessageTypes.IncidentCreated)
             .ToListAsync();
 
         outbox.Should().HaveCount(1);
@@ -66,7 +66,7 @@ public sealed class OutboxEmitTests(ApiFactory factory) : IAsyncLifetime
         var db = scope.ServiceProvider.GetRequiredService<FlareDbContext>();
         var outbox = await db.OutboxMessages
             .AsNoTracking()
-            .Where(o => o.Type == "IncidentEventAdded")
+            .Where(o => o.Type == OutboxMessageTypes.IncidentEventAdded)
             .ToListAsync();
 
         outbox.Should().HaveCount(1);

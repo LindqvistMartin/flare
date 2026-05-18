@@ -34,7 +34,7 @@ public sealed class SlackDispatchTests(ApiFactory _)
         await factory.CleanAsync();
 
         var (incidentId, _) = await SeedIncidentAsync(factory);
-        await SeedOutboxAsync(factory, "IncidentCreated",
+        await SeedOutboxAsync(factory, OutboxMessageTypes.IncidentCreated,
             JsonSerializer.Serialize(new { IncidentId = incidentId, Source = "manual" }));
 
         var dispatcher = factory.Services.GetRequiredService<NotificationDispatcher>();
@@ -72,7 +72,7 @@ public sealed class SlackDispatchTests(ApiFactory _)
         await factory.CleanAsync();
 
         var (incidentId, _) = await SeedIncidentAsync(factory);
-        await SeedOutboxAsync(factory, "IncidentEventAdded",
+        await SeedOutboxAsync(factory, OutboxMessageTypes.IncidentEventAdded,
             JsonSerializer.Serialize(new { IncidentId = incidentId, EventId = Guid.NewGuid(), Type = "CommentAdded" }));
 
         var dispatcher = factory.Services.GetRequiredService<NotificationDispatcher>();
@@ -97,7 +97,7 @@ public sealed class SlackDispatchTests(ApiFactory _)
         await factory.CleanAsync();
 
         var (incidentId, _) = await SeedIncidentAsync(factory);
-        await SeedOutboxAsync(factory, "IncidentCreated",
+        await SeedOutboxAsync(factory, OutboxMessageTypes.IncidentCreated,
             JsonSerializer.Serialize(new { IncidentId = incidentId, Source = "manual" }));
 
         var dispatcher = factory.Services.GetRequiredService<NotificationDispatcher>();

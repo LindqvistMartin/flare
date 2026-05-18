@@ -56,7 +56,7 @@ public sealed class DispatcherDroppedCounterTests(ApiFactory _)
         {
             var db = scope.ServiceProvider.GetRequiredService<FlareDbContext>();
             db.OutboxMessages.Add(new OutboxMessage(
-                "IncidentCreated",
+                OutboxMessageTypes.IncidentCreated,
                 System.Text.Json.JsonSerializer.Serialize(new { IncidentId = Guid.NewGuid(), Source = "manual" })));
             await db.SaveChangesAsync();
         }

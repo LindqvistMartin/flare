@@ -24,7 +24,9 @@ public sealed class ActionItemReminderService(
     // hammer the DB at zero delay until manual intervention.
     internal static readonly TimeSpan FailureBackoff = TimeSpan.FromMinutes(15);
 
-    internal const string HeartbeatType = "ReminderHeartbeat";
+    // Source-compat alias for callers that already referenced this. New code should use
+    // OutboxMessageTypes.ReminderHeartbeat directly.
+    internal const string HeartbeatType = OutboxMessageTypes.ReminderHeartbeat;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -114,7 +116,7 @@ public sealed class ActionItemReminderService(
                 OwnerId = item.OwnerId,
                 DueDate = item.DueDate
             });
-            db.OutboxMessages.Add(new OutboxMessage("ActionItemOverdue", payload));
+            db.OutboxMessages.Add(new OutboxMessage(OutboxMessageTypes.ActionItemOverdue, payload));
         }
 
         // Heartbeat row marks tick completion — picked up by ComputeNextDelayAsync on the

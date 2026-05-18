@@ -69,7 +69,7 @@ public sealed class IngestionWorker(
                     JsonSerializer.Serialize(new { cmd.Title, Severity = cmd.Severity.ToString(), Source = job.Source }),
                     actorId: null);
                 var outbox = new OutboxMessage(
-                    "IncidentCreated",
+                    OutboxMessageTypes.IncidentCreated,
                     JsonSerializer.Serialize(new { IncidentId = incident.Id, Source = job.Source }));
 
                 db.Incidents.Add(incident);
