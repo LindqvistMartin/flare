@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Flare.Infrastructure.Hubs;
+using Flare.Infrastructure.Notifications;
 using Flare.Infrastructure.Persistence;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
@@ -12,9 +13,12 @@ namespace Flare.Infrastructure.BackgroundServices;
 public sealed class NotificationDispatcher(
     IServiceScopeFactory scopeFactory,
     IHubContext<FlareHub> hub,
+    IEnumerable<INotificationChannel> channels,
     ILogger<NotificationDispatcher> logger) : BackgroundService
 {
     private readonly record struct PendingBroadcast(Guid Id, string Type, string Payload);
+
+    private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(500);
 
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
@@ -22,24 +26,35 @@ public sealed class NotificationDispatcher(
         {
             try
             {
-                var batch = await CommitBatchAsync(ct);
-                foreach (var msg in batch)
-                    await BroadcastAsync(msg, ct);
+                await ProcessOnceAsync(ct);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 logger.LogWarning(ex, "NotificationDispatcher encountered an error");
             }
 
-            await Task.Delay(TimeSpan.FromMilliseconds(500), ct);
+            try { await Task.Delay(PollInterval, ct); }
+            catch (OperationCanceledException) { return; }
         }
     }
 
-    private async Task<IReadOnlyList<PendingBroadcast>> CommitBatchAsync(CancellationToken ct)
+    // Single tick of the dispatcher: claim a batch under FOR UPDATE SKIP LOCKED, commit
+    // mark-processed, then broadcast post-commit. Exposed as internal so integration tests
+    // can drive one deterministic tick instead of racing against the 500ms poll loop.
+    internal async Task ProcessOnceAsync(CancellationToken ct)
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<FlareDbContext>();
 
+        var batch = await CommitBatchAsync(db, ct);
+        if (batch.Count == 0) return;
+
+        foreach (var msg in batch)
+            await BroadcastAsync(msg, db, ct);
+    }
+
+    private async Task<IReadOnlyList<PendingBroadcast>> CommitBatchAsync(FlareDbContext db, CancellationToken ct)
+    {
         // SKIP LOCKED prevents concurrent dispatcher instances from processing the same rows.
         // Rows locked by another transaction are skipped, not blocked on.
         await using var tx = await db.Database.BeginTransactionAsync(ct);
@@ -77,12 +92,21 @@ public sealed class NotificationDispatcher(
         return pending;
     }
 
-    private async Task BroadcastAsync(PendingBroadcast msg, CancellationToken ct)
+    private async Task BroadcastAsync(PendingBroadcast msg, FlareDbContext db, CancellationToken ct)
+    {
+        Guid? incidentId = TryExtractIncidentId(msg.Payload);
+
+        await BroadcastSignalRAsync(msg, incidentId, ct);
+
+        var notification = await BuildNotificationAsync(msg, db, incidentId, ct);
+        if (notification is not null)
+            await FanOutToChannelsAsync(notification, ct);
+    }
+
+    private async Task BroadcastSignalRAsync(PendingBroadcast msg, Guid? incidentId, CancellationToken ct)
     {
         try
         {
-            Guid? incidentId = TryExtractIncidentId(msg.Payload);
-
             switch (msg.Type)
             {
                 case "IncidentCreated":
@@ -115,6 +139,9 @@ public sealed class NotificationDispatcher(
                             msg.Type, msg.Id);
                     }
                     break;
+                case "ActionItemOverdue":
+                    // Channels only — no realtime UI surface for action item reminders yet.
+                    break;
                 default:
                     logger.LogWarning(
                         "Outbox message {Type} {Id} has no broadcast route; ignored",
@@ -127,6 +154,122 @@ public sealed class NotificationDispatcher(
             // Best-effort broadcast. The row is already marked processed; retrying here
             // would create poison messages. Clients refetch on (re)connect to recover.
             logger.LogWarning(ex, "SignalR broadcast failed for {Type} {Id}", msg.Type, msg.Id);
+        }
+    }
+
+    private async Task<NotificationMessage?> BuildNotificationAsync(
+        PendingBroadcast msg,
+        FlareDbContext db,
+        Guid? incidentId,
+        CancellationToken ct)
+    {
+        if (incidentId is not { } id) return null;
+
+        switch (msg.Type)
+        {
+            case "IncidentCreated":
+                return await HydrateIncidentAsync(db, id, NotificationKind.IncidentCreated, detail: null, ct);
+            case "IncidentStatusChanged":
+                return await HydrateIncidentAsync(db, id, NotificationKind.IncidentStatusChanged, detail: null, ct);
+            case "ActionItemOverdue":
+                var (title, detail) = ParseActionItemPayload(msg.Payload);
+                return await HydrateIncidentAsync(db, id, NotificationKind.ActionItemOverdue, detail, ct, titleOverride: title);
+            // IncidentEventAdded and unknown types do not surface in channels — too noisy
+            // for chat, and unknown types have no agreed payload shape.
+            default:
+                return null;
+        }
+    }
+
+    private async Task<NotificationMessage?> HydrateIncidentAsync(
+        FlareDbContext db,
+        Guid incidentId,
+        NotificationKind kind,
+        string? detail,
+        CancellationToken ct,
+        string? titleOverride = null)
+    {
+        var incident = await db.Incidents
+            .AsNoTracking()
+            .Include(i => i.Service)
+            .FirstOrDefaultAsync(i => i.Id == incidentId, ct);
+        if (incident is null)
+        {
+            logger.LogWarning(
+                "Cannot hydrate notification for {Kind}: incident {Id} not found",
+                kind, incidentId);
+            return null;
+        }
+        return new NotificationMessage(
+            Kind: kind,
+            IncidentId: incident.Id,
+            Title: titleOverride ?? incident.Title,
+            Severity: incident.Severity,
+            Status: incident.Status,
+            ServiceName: incident.Service?.Name ?? "(unknown service)",
+            OccurredAt: DateTime.UtcNow,
+            Detail: detail);
+    }
+
+    private static (string Title, string Detail) ParseActionItemPayload(string payload)
+    {
+        const string defaultTitle = "Action item";
+        const string defaultDetail = "Past due date";
+        try
+        {
+            using var doc = JsonDocument.Parse(payload);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+                return (defaultTitle, defaultDetail);
+
+            var title = TryGetString(doc.RootElement, "Title") ?? defaultTitle;
+            var dueDate = TryGetString(doc.RootElement, "DueDate");
+            var detail = dueDate is null ? defaultDetail : $"Overdue (due {dueDate})";
+            return (title, detail);
+        }
+        catch (JsonException)
+        {
+            return (defaultTitle, defaultDetail);
+        }
+    }
+
+    private static string? TryGetString(JsonElement root, string propertyName)
+    {
+        foreach (var prop in root.EnumerateObject())
+        {
+            if (string.Equals(prop.Name, propertyName, StringComparison.OrdinalIgnoreCase)
+                && prop.Value.ValueKind == JsonValueKind.String)
+            {
+                return prop.Value.GetString();
+            }
+        }
+        return null;
+    }
+
+    private async Task FanOutToChannelsAsync(NotificationMessage message, CancellationToken ct)
+    {
+        // Materialize tasks before awaiting so one slow / failing channel does not delay siblings.
+        // SafeSendAsync isolates exceptions; Task.WhenAll waits for the slowest enabled channel.
+        var tasks = channels
+            .Where(c => c.IsEnabled)
+            .Select(c => SafeSendAsync(c, message, ct))
+            .ToArray();
+        if (tasks.Length == 0) return;
+        await Task.WhenAll(tasks);
+    }
+
+    private async Task SafeSendAsync(INotificationChannel channel, NotificationMessage message, CancellationToken ct)
+    {
+        try
+        {
+            await channel.SendAsync(message, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Post-commit semantics: the outbox row is already marked processed, so a channel
+            // failure here is permanently lost from this side. Operators see it in logs and
+            // recover via client refetch / out-of-band notification.
+            logger.LogWarning(ex, "Notification channel {Name} failed for {Kind} of incident {IncidentId}",
+                channel.Name, message.Kind, message.IncidentId);
         }
     }
 
