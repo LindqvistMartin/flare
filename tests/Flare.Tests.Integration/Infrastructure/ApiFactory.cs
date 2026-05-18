@@ -1,4 +1,5 @@
 using Flare.Infrastructure.BackgroundServices;
+using Flare.Infrastructure.Notifications;
 using Flare.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -20,6 +21,11 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
         .WithDatabase("flare_test")
         .Build();
 
+    private readonly Dictionary<string, string?> _configOverrides = new();
+    private bool _registerDispatcherAsSingleton;
+    private HttpMessageHandler? _slackHandler;
+    private HttpMessageHandler? _teamsHandler;
+
     public async Task InitializeAsync()
     {
         await _pg.StartAsync();
@@ -32,6 +38,36 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
         await db.Database.MigrateAsync();
     }
 
+    // Fluent opt-ins: chain before any property that triggers host build (Server, CreateClient,
+    // Services). Calling these after host build is a no-op since ConfigureWebHost has already run.
+
+    public ApiFactory WithNotificationOverride(string key, string value)
+    {
+        _configOverrides[$"Notifications:{key}"] = value;
+        return this;
+    }
+
+    public ApiFactory WithDispatcherForManualTick()
+    {
+        // Re-registers NotificationDispatcher as a plain singleton — the BackgroundService is
+        // stripped (so no background tick races the assertion) and the test drives one
+        // deterministic ProcessOnceAsync call.
+        _registerDispatcherAsSingleton = true;
+        return this;
+    }
+
+    public ApiFactory WithSlackHandler(HttpMessageHandler handler)
+    {
+        _slackHandler = handler;
+        return this;
+    }
+
+    public ApiFactory WithTeamsHandler(HttpMessageHandler handler)
+    {
+        _teamsHandler = handler;
+        return this;
+    }
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         // ConfigureAppConfiguration appends to the IConfiguration chain *after* the
@@ -40,20 +76,40 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
         // SUT directory.
         builder.ConfigureAppConfiguration((_, cfg) =>
         {
-            cfg.AddInMemoryCollection(new Dictionary<string, string?>
+            var dict = new Dictionary<string, string?>(_configOverrides)
             {
                 ["ConnectionStrings:Postgres"] = _pg.GetConnectionString()
-            });
+            };
+            cfg.AddInMemoryCollection(dict);
         });
 
         builder.ConfigureTestServices(services =>
         {
             // Hosted services register as (IHostedService, implType). RemoveAll<T> matches on
-            // ServiceType, so filter by ImplementationType. Use RemoveAll with predicate so a
-            // future double-registration does not crash the fixture with InvalidOperationException.
+            // ServiceType, so filter by ImplementationType. Use predicate-based iterate-and-remove
+            // so a future double-registration does not crash the fixture with InvalidOperationException.
             RemoveHosted<IngestionWorker>(services);
             RemoveHosted<NotificationDispatcher>(services);
             RemoveHosted<MetricsAggregator>(services);
+            RemoveHosted<ActionItemReminderService>(services);
+
+            if (_registerDispatcherAsSingleton)
+            {
+                // Tests resolve via GetRequiredService<NotificationDispatcher>() and call
+                // internal ProcessOnceAsync directly — see InternalsVisibleTo in Infrastructure.csproj.
+                services.AddSingleton<NotificationDispatcher>();
+            }
+
+            if (_slackHandler is not null)
+            {
+                services.AddHttpClient(SlackNotificationChannel.HttpClientName)
+                    .ConfigurePrimaryHttpMessageHandler(() => _slackHandler);
+            }
+            if (_teamsHandler is not null)
+            {
+                services.AddHttpClient(TeamsNotificationChannel.HttpClientName)
+                    .ConfigurePrimaryHttpMessageHandler(() => _teamsHandler);
+            }
         });
     }
 
