@@ -1,3 +1,4 @@
+using System.Net.Http;
 using System.Threading.Channels;
 using Flare.Core.Abstractions;
 using Flare.Core.Workers;
@@ -8,6 +9,7 @@ using Flare.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 namespace Flare.Infrastructure;
 
@@ -31,13 +33,29 @@ public static class ServiceExtensions
         services.AddSingleton<IAlertIngestionAdapter, PulseWatchAlertIngestionAdapter>();
         services.AddSingleton<IAlertIngestionAdapter, GenericWebhookAdapter>();
 
-        services.AddOptions<NotificationOptions>().BindConfiguration("Notifications");
+        services.AddOptions<NotificationOptions>()
+            .BindConfiguration("Notifications")
+            .ValidateOnStart();
+        services.AddSingleton<IValidateOptions<NotificationOptions>, NotificationOptionsValidator>();
 
         // Named HttpClients so tests can override the primary handler per channel without
         // touching the channel registration. 10s ceiling caps dispatcher tick stalls when a
         // webhook hangs — outbox is at-most-once-on-wire, so a slow channel must not block siblings.
-        services.AddHttpClient(SlackNotificationChannel.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(10));
-        services.AddHttpClient(TeamsNotificationChannel.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(10));
+        // AllowAutoRedirect=false denies an SSRF redirect chain that could re-emit the webhook
+        // bearer-URL to an attacker host. PooledConnectionLifetime caps DNS-rotation latency for
+        // webhook hosts that move between Slack/Teams CDNs.
+        services.AddHttpClient(SlackNotificationChannel.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(10))
+            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+            {
+                AllowAutoRedirect = false,
+                PooledConnectionLifetime = TimeSpan.FromMinutes(2),
+            });
+        services.AddHttpClient(TeamsNotificationChannel.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(10))
+            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+            {
+                AllowAutoRedirect = false,
+                PooledConnectionLifetime = TimeSpan.FromMinutes(2),
+            });
 
         services.AddSingleton<INotificationChannel, SlackNotificationChannel>();
         services.AddSingleton<INotificationChannel, TeamsNotificationChannel>();

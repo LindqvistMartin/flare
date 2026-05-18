@@ -26,7 +26,7 @@ public sealed class SlackDispatchTests(ApiFactory _)
         var handler = new RecordingHttpMessageHandler { ResponseStatus = HttpStatusCode.OK };
 
         await using var factory = new ApiFactory()
-            .WithNotificationOverride("Slack:WebhookUrl", "https://hooks.slack.test/services/AAA/BBB")
+            .WithNotificationOverride("Slack:WebhookUrl", "https://hooks.slack.com/services/T0/B0/secret")
             .WithDispatcherForManualTick()
             .WithSlackHandler(handler);
 
@@ -43,7 +43,7 @@ public sealed class SlackDispatchTests(ApiFactory _)
         handler.Requests.Should().HaveCount(1, "the Slack channel is enabled and the outbox row matched IncidentCreated");
         var request = handler.Requests[0];
         request.Method.Should().Be(HttpMethod.Post);
-        request.Uri!.ToString().Should().Be("https://hooks.slack.test/services/AAA/BBB");
+        request.Uri!.ToString().Should().Be("https://hooks.slack.com/services/T0/B0/secret");
 
         var payload = JsonDocument.Parse(request.Body);
         payload.RootElement.GetProperty("text").GetString().Should().Contain("Payment API");
@@ -64,7 +64,7 @@ public sealed class SlackDispatchTests(ApiFactory _)
         var handler = new RecordingHttpMessageHandler();
 
         await using var factory = new ApiFactory()
-            .WithNotificationOverride("Slack:WebhookUrl", "https://hooks.slack.test/services/AAA/BBB")
+            .WithNotificationOverride("Slack:WebhookUrl", "https://hooks.slack.com/services/T0/B0/secret")
             .WithDispatcherForManualTick()
             .WithSlackHandler(handler);
 
