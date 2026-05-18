@@ -142,6 +142,10 @@ public sealed class NotificationDispatcher(
                 case "ActionItemOverdue":
                     // Channels only — no realtime UI surface for action item reminders yet.
                     break;
+                case "ReminderHeartbeat":
+                    // Internal schedule watermark written by ActionItemReminderService at the
+                    // end of every tick. Not user-facing — no broadcast, no warning.
+                    break;
                 default:
                     logger.LogWarning(
                         "Outbox message {Type} {Id} has no broadcast route; ignored",
@@ -174,8 +178,9 @@ public sealed class NotificationDispatcher(
             case "ActionItemOverdue":
                 var (title, detail) = ParseActionItemPayload(msg.Payload);
                 return await HydrateIncidentAsync(db, id, NotificationKind.ActionItemOverdue, detail, ct, titleOverride: title);
-            // IncidentEventAdded and unknown types do not surface in channels — too noisy
-            // for chat, and unknown types have no agreed payload shape.
+            // IncidentEventAdded, ReminderHeartbeat, and unknown types do not surface in
+            // channels — too noisy for chat, schedule watermarks are internal, and unknown
+            // types have no agreed payload shape.
             default:
                 return null;
         }
