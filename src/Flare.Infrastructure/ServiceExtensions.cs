@@ -3,6 +3,7 @@ using Flare.Core.Abstractions;
 using Flare.Core.Workers;
 using Flare.Infrastructure.BackgroundServices;
 using Flare.Infrastructure.Ingestion;
+using Flare.Infrastructure.Notifications;
 using Flare.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -29,6 +30,17 @@ public static class ServiceExtensions
         services.AddSingleton<IAlertIngestionAdapter, GrafanaAlertIngestionAdapter>();
         services.AddSingleton<IAlertIngestionAdapter, PulseWatchAlertIngestionAdapter>();
         services.AddSingleton<IAlertIngestionAdapter, GenericWebhookAdapter>();
+
+        services.AddOptions<NotificationOptions>().BindConfiguration("Notifications");
+
+        // Named HttpClients so tests can override the primary handler per channel without
+        // touching the channel registration. 10s ceiling caps dispatcher tick stalls when a
+        // webhook hangs — outbox is at-most-once-on-wire, so a slow channel must not block siblings.
+        services.AddHttpClient(SlackNotificationChannel.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(10));
+        services.AddHttpClient(TeamsNotificationChannel.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(10));
+
+        services.AddSingleton<INotificationChannel, SlackNotificationChannel>();
+        services.AddSingleton<INotificationChannel, TeamsNotificationChannel>();
 
         services.AddHostedService<IngestionWorker>();
         services.AddHostedService<NotificationDispatcher>();
