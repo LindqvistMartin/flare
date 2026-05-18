@@ -22,6 +22,13 @@ public sealed class ActionItemReminderService(
     {
         while (!stoppingToken.IsCancellationRequested)
         {
+            // Delay BEFORE the first tick: otherwise every process start (deploys, dev hot
+            // reload, container restart) re-pings every overdue item. The 24h floor means new
+            // overdue items may wait up to a day for their first reminder — acceptable for MVP
+            // and far less noisy than restart-storm spam.
+            try { await Task.Delay(Period, stoppingToken); }
+            catch (OperationCanceledException) { return; }
+
             try
             {
                 await TickAsync(stoppingToken);
@@ -30,9 +37,6 @@ public sealed class ActionItemReminderService(
             {
                 logger.LogWarning(ex, "ActionItemReminder tick failed");
             }
-
-            try { await Task.Delay(Period, stoppingToken); }
-            catch (OperationCanceledException) { return; }
         }
     }
 
@@ -46,10 +50,15 @@ public sealed class ActionItemReminderService(
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
 
         var overdue = await db.ActionItems
+            .AsNoTracking()
             .Include(a => a.Postmortem)
             .Where(a => a.Status != ActionItemStatus.Done
                      && a.DueDate != null
-                     && a.DueDate < today)
+                     && a.DueDate < today
+                     // Filter orphaned action items defensively — FK should make this impossible,
+                     // but a manual restore or partial backfill could leave Postmortem unsatisfied
+                     // and we would NRE on item.Postmortem.IncidentId below.
+                     && a.Postmortem != null)
             .ToListAsync(ct);
 
         if (overdue.Count == 0)

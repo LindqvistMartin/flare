@@ -273,8 +273,17 @@ public sealed class NotificationDispatcher(
         {
             await channel.SendAsync(message, ct);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
+            // Host shutdown — let the outer ExecuteAsync return gracefully. Outbox row stays
+            // mark-processed; the in-flight broadcast is acceptably lost on graceful stop.
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Includes HttpClient internal timeout (TaskCanceledException raised by the client
+            // itself, without the host token firing) — must be caught here, otherwise one slow
+            // channel kills the remainder of the batch loop and silently loses sibling broadcasts.
             // Post-commit semantics: the outbox row is already marked processed, so a channel
             // failure here is permanently lost from this side. Operators see it in logs and
             // recover via client refetch / out-of-band notification.
