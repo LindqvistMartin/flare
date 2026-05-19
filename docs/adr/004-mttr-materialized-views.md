@@ -114,19 +114,6 @@ When the base table outgrows the five-minute refresh budget:
 The dashboard contract (`/api/v1/metrics/{mttr,mtta,dashboard}`) is stable
 under all three steps — the API shape does not change.
 
-## Cross-cutting note: per-instance caches
-
-Two layers carry per-process state that does not cross replicas: the
-`IMemoryCache`-backed status page cache and the `Idempotency-Key` request
-cache. With multiple Flare replicas behind a load balancer, an invalidation
-applied by replica A through the notification dispatcher does not reach
-replica B's in-memory state. Replica B continues to serve its stale
-status page snapshot for up to the 30-second TTL, and its idempotency
-cache for up to the five-minute window. The ceiling is therefore the TTL,
-not the gap between replica clocks. Acceptable for MVP; documented here so
-a future deployment story (Redis-backed cache, sticky sessions, or shorter
-TTL) is a deliberate decision and not a discovered surprise.
-
 ## Verification
 
 - `MetricsAggregatorTests` exercises the refresh path against a real

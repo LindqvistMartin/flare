@@ -6,7 +6,7 @@
 [![.NET](https://img.shields.io/badge/.NET-10-purple.svg)](https://dotnet.microsoft.com)
 [![React](https://img.shields.io/badge/React-18-61dafb.svg)](https://react.dev)
 [![CI](https://github.com/LindqvistMartin/flare/actions/workflows/ci.yml/badge.svg)](https://github.com/LindqvistMartin/flare/actions)
-[![Tests](https://img.shields.io/badge/tests-190%20passing-brightgreen.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-192%20passing-brightgreen.svg)](#)
 
 ## Architecture
 
@@ -97,7 +97,9 @@ strategy and its scaling path are documented in
   `IncidentStatusChanged` so changes surface within one tick instead of waiting
   out the TTL. Admin CRUD lives under `/api/v1/status-pages`; the public
   endpoint sits outside `/api/v1` so a future auth gate on the admin surface
-  does not lock customers out of the status page.
+  does not lock customers out of the status page. Admin CRUD is currently
+  unauthenticated — auth lands with the next milestone (see ADR-005).
+  See [ADR-005](docs/adr/005-status-page-cache.md) for the cache design.
 - **Slack & Teams channels** — pluggable via `INotificationChannel`. Webhook URLs
   are validated against an HTTPS host allowlist (`hooks.slack.com`,
   `*.webhook.office.com`) at startup via `ValidateOnStart` — a misconfigured

@@ -22,9 +22,7 @@ public sealed class StatusPageCache(IMemoryCache cache, IServiceScopeFactory sco
     //                                                       be pruned (no callback fires when
     //                                                       eviction happens without access).
     //   _slugLocks      slug -> monitor used to serialize    Lifetime: forever, bounded by
-    //                   TrySet / Invalidate on that slug.    status_pages row count (admin
-    //                                                       CRUD is currently unauthenticated
-    //                                                       — track when M3 lands).
+    //                   TrySet / Invalidate on that slug.    distinct slugs ever seen.
     //
     // Lock order across the file: slug lock OUTER, reverse-index bucket lock INNER. Never
     // reverse. OnEviction (which takes bucket locks) only runs synchronously inside a
@@ -94,13 +92,11 @@ public sealed class StatusPageCache(IMemoryCache cache, IServiceScopeFactory sco
         Func<CancellationToken, Task<StatusPageLoad?>> loader,
         CancellationToken ct)
     {
-        // Single attempt. Earlier passes retried on TrySet rejection to close a transient
-        // 404 window, but the retry opened a sustained-Invalidate DoS amplifier (every read
-        // pays double DB cost) and re-opened the recovery-path thundering herd that the
-        // outer single-flight closes. Falling back to TryGet keeps the cost bounded: if a
-        // concurrent writer landed a newer snapshot, we serve it; otherwise null surfaces
-        // as 404, matching the established invariant from the original symmetric-recovery
-        // commit.
+        // Single attempt: if an Invalidate races the load (version moves between capture and
+        // TrySet), fall back to whatever the cache holds. A concurrent writer that landed a
+        // newer snapshot serves it; otherwise null surfaces as 404 for one request (bounded
+        // staleness — see ADR-005). Retrying instead would re-open thundering herd on this
+        // recovery path and amplify sustained-Invalidate cost.
         var capturedVersion = GetVersion(slug);
         var loaded = await loader(ct);
         if (loaded is null) return null;

@@ -11,6 +11,9 @@ public static class StatusPagesEndpoints
 {
     public static IEndpointRouteBuilder MapStatusPageEndpoints(this IEndpointRouteBuilder app)
     {
+        // TODO: admin CRUD is currently unauthenticated — gate behind admin auth before any
+        // public deploy. The public read endpoint (PublicStatusEndpoints) stays open; only
+        // POST/PUT/DELETE on this group need to require admin claims.
         var group = app.MapGroup("/api/v1/status-pages");
 
         group.MapGet("", async (FlareDbContext db, CancellationToken ct) =>
