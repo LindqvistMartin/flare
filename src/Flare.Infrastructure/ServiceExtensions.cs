@@ -3,6 +3,7 @@ using System.Threading.Channels;
 using Flare.Core.Abstractions;
 using Flare.Core.Workers;
 using Flare.Infrastructure.BackgroundServices;
+using Flare.Infrastructure.Caching;
 using Flare.Infrastructure.Ingestion;
 using Flare.Infrastructure.Notifications;
 using Flare.Infrastructure.Persistence;
@@ -59,6 +60,8 @@ public static class ServiceExtensions
 
         services.AddSingleton<INotificationChannel, SlackNotificationChannel>();
         services.AddSingleton<INotificationChannel, TeamsNotificationChannel>();
+
+        services.AddSingleton<IStatusPageCache, StatusPageCache>();
 
         services.AddHostedService<IngestionWorker>();
         services.AddHostedService<NotificationDispatcher>();

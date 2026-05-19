@@ -1,4 +1,4 @@
-﻿using Flare.Infrastructure.Notifications;
+﻿using Flare.Core.Sanitization;
 using FluentAssertions;
 using Xunit;
 

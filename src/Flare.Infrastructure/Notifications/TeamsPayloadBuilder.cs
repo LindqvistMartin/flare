@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
 using Flare.Core.Entities;
+using Flare.Core.Sanitization;
 
 namespace Flare.Infrastructure.Notifications;
 

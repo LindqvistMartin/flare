@@ -16,6 +16,7 @@ public sealed class FlareDbContext(DbContextOptions<FlareDbContext> options) : D
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
     public DbSet<MttrByServiceRow> MttrByService30d => Set<MttrByServiceRow>();
     public DbSet<MttaByServiceRow> MttaByService30d => Set<MttaByServiceRow>();
+    public DbSet<StatusPage> StatusPages => Set<StatusPage>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
         => modelBuilder.ApplyConfigurationsFromAssembly(typeof(FlareDbContext).Assembly);

@@ -156,7 +156,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
         // does not block test cleanup. CASCADE chases all FK dependents in one statement.
         // Adding a new entity? Append its table here — the list is not driven by EF metadata.
         await db.Database.ExecuteSqlRawAsync(
-            """TRUNCATE TABLE "ActionItems", "Postmortems", "OutboxMessages", "IncidentEvents", "Incidents", "Services", "Teams", "Organizations" CASCADE""");
+            """TRUNCATE TABLE "ActionItems", "Postmortems", "OutboxMessages", "IncidentEvents", "Incidents", "StatusPages", "Services", "Teams", "Organizations" CASCADE""");
         // Matviews do not follow FK CASCADE; refresh them so metrics tests see an empty state
         // matching the wiped base tables. CONCURRENTLY needs the unique index that the migration provides.
         await db.Database.ExecuteSqlRawAsync("""REFRESH MATERIALIZED VIEW CONCURRENTLY mttr_by_service_30d""");

@@ -78,6 +78,8 @@ app.MapActionItemEndpoints();
 app.MapWebhookEndpoints();
 app.MapPostmortemEndpoints();
 app.MapMetricsEndpoints();
+app.MapStatusPageEndpoints();
+app.MapPublicStatusEndpoints();
 
 app.MapHub<FlareHub>("/hubs/flare");
 

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using Flare.Core.Entities;
+using Flare.Infrastructure.Caching;
 using Flare.Infrastructure.Hubs;
 using Flare.Infrastructure.Notifications;
 using Flare.Infrastructure.Persistence;
@@ -16,6 +17,7 @@ public sealed class NotificationDispatcher(
     IServiceScopeFactory scopeFactory,
     IHubContext<FlareHub> hub,
     IEnumerable<INotificationChannel> channels,
+    IStatusPageCache statusPageCache,
     ILogger<NotificationDispatcher> logger) : BackgroundService
 {
     private readonly record struct PendingBroadcast(Guid Id, string Type, string Payload);
@@ -135,6 +137,8 @@ public sealed class NotificationDispatcher(
         Guid? incidentId = TryExtractIncidentId(msg.Payload);
 
         await BroadcastSignalRAsync(msg, incidentId, ct);
+
+        await InvalidateStatusPageCacheAsync(msg, db, incidentId, ct);
 
         var notification = await BuildNotificationAsync(msg, db, incidentId, ct);
         if (notification is not null)
@@ -385,6 +389,38 @@ public sealed class NotificationDispatcher(
             NotificationDiagnostics.ChannelSends.Add(1,
                 new KeyValuePair<string, object?>("channel", channel.Name),
                 new KeyValuePair<string, object?>("result", "error"));
+        }
+    }
+
+    // Public status pages cache by slug; the dispatcher is the natural point to expire entries
+    // whose underlying state moved. IncidentEventAdded is excluded — comments and minor
+    // timeline events don't change the public-facing summary (active list + 30-day count).
+    private async Task InvalidateStatusPageCacheAsync(
+        PendingBroadcast msg,
+        FlareDbContext db,
+        Guid? incidentId,
+        CancellationToken ct)
+    {
+        if (msg.Type is not OutboxMessageTypes.IncidentCreated and not OutboxMessageTypes.IncidentStatusChanged)
+            return;
+        if (incidentId is not { } id) return;
+
+        var serviceId = await db.Incidents
+            .AsNoTracking()
+            .Where(i => i.Id == id)
+            .Select(i => i.ServiceId)
+            .FirstOrDefaultAsync(ct);
+        if (serviceId == Guid.Empty) return;
+
+        try
+        {
+            await statusPageCache.InvalidateForServiceAsync(serviceId, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Best-effort: a cache that can't be invalidated will self-expire in ≤30s. Don't
+            // block channel fan-out because of an in-memory bookkeeping hiccup.
+            logger.LogWarning(ex, "Status page cache invalidation failed for service {ServiceId}", serviceId);
         }
     }
 

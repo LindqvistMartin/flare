@@ -1,8 +1,8 @@
-﻿using System.Text;
+using System.Text;
 
-namespace Flare.Infrastructure.Notifications;
+namespace Flare.Core.Sanitization;
 
-internal static class PayloadSanitizer
+public static class PayloadSanitizer
 {
     private const int MaxLength = 256;
     private const string Ellipsis = "...";
@@ -15,7 +15,8 @@ internal static class PayloadSanitizer
         if (string.IsNullOrEmpty(raw)) return string.Empty;
 
         // Strip every form of line break: CR/LF would let a crafted title forge an extra
-        // visual block under a SEV1 header in Slack/Teams.
+        // visual block under a SEV1 header in Slack/Teams or split a JSON value across
+        // lines in a debug renderer downstream.
         var s = raw
             .Replace("\r\n", " ", StringComparison.Ordinal)
             .Replace('\r', ' ')
@@ -31,7 +32,8 @@ internal static class PayloadSanitizer
 
         // HTML-entity-escape the characters Slack uses for link / format syntax. Slack
         // auto-escapes & < > on its end as well, but explicit escape closes the gap when
-        // the same string flows into other renderers (Teams cards, logs, future channels).
+        // the same string flows into other renderers (Teams cards, public-status JSON,
+        // logs, future channels).
         s = s
             .Replace("&", "&amp;", StringComparison.Ordinal)
             .Replace("<", "&lt;", StringComparison.Ordinal)

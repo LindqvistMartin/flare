@@ -6,7 +6,7 @@
 [![.NET](https://img.shields.io/badge/.NET-10-purple.svg)](https://dotnet.microsoft.com)
 [![React](https://img.shields.io/badge/React-18-61dafb.svg)](https://react.dev)
 [![CI](https://github.com/LindqvistMartin/flare/actions/workflows/ci.yml/badge.svg)](https://github.com/LindqvistMartin/flare/actions)
-[![Tests](https://img.shields.io/badge/tests-154%20passing-brightgreen.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-190%20passing-brightgreen.svg)](#)
 
 ## Architecture
 
@@ -20,8 +20,9 @@ logs, Scalar UI on `/scalar` for the OpenAPI document.
    alerts ───▶  │ API: POST /api/v1/webhooks/ingest/{source}       │
   (Prometheus,  │      POST /api/v1/incidents/{id}/postmortem/...  │
    Grafana,     │      GET  /api/v1/metrics/{mttr,mtta,dashboard}  │
-   PulseWatch,  │                                                  │
-   generic)     │   IAlertIngestionAdapter (4 implementations)     │
+   PulseWatch,  │      GET  /public/status/{slug}  (cached 30s)    │
+   generic)     │                                                  │
+                │   IAlertIngestionAdapter (4 implementations)     │
                 │   Channel<IngestionJob>  (bounded, DropWrite)    │
                 │   PostmortemDraftBuilder (inline, synchronous)   │
                 └──────────────────────────────────────────────────┘
@@ -38,7 +39,8 @@ logs, Scalar UI on `/scalar` for the OpenAPI document.
                 │ Postgres                                         │
                 │   incidents, incident_events (append-only),      │
                 │   postmortems, action_items, outbox_messages,    │
-                │   mttr_by_service_30d, mtta_by_service_30d       │
+                │   status_pages, mttr_by_service_30d,             │
+                │   mtta_by_service_30d                            │
                 │     (materialized views, refreshed every 5 min)  │
                 └──────────────────────────────────────────────────┘
                           │                          │
@@ -46,7 +48,9 @@ logs, Scalar UI on `/scalar` for the OpenAPI document.
               ┌────────────────────────┐  ┌───────────────────────────┐
               │ NotificationDispatcher │  │ MetricsAggregator         │
               │   outbox SKIP LOCKED   │  │   REFRESH CONCURRENTLY 5m │
-              └────────────────────────┘  └───────────────────────────┘
+              │   → status-page cache  │  └───────────────────────────┘
+              │     invalidation       │
+              └────────────────────────┘
 ```
 
 Incident events are append-only at the Postgres trigger level — see
@@ -58,7 +62,9 @@ best-effort — see [ADR-003](docs/adr/003-outbox-notification-dispatch.md). MTT
 and MTTA are aggregated per service over a rolling 30-day window from the
 canonical `Incident.ResolvedAt` and `Incident.AcknowledgedAt` timestamps — the
 domain state machine writes those atomically with the matching event, so the
-matview SQL stays fast and independent of event payload format.
+matview SQL stays fast and independent of event payload format. The matview
+strategy and its scaling path are documented in
+[ADR-004](docs/adr/004-mttr-materialized-views.md).
 
 ## Backend features
 
@@ -84,6 +90,14 @@ matview SQL stays fast and independent of event payload format.
   runs concurrently (cap 10) on per-message DbContext scopes so one slow
   webhook does not wedge sibling messages. At-least-once on DB, at-most-once
   on the wire — see ADR-003.
+- **Public status pages** — read-only `GET /public/status/{slug}` returns
+  per-service current status and 30-day incident count for an operator-curated
+  service list. Responses are cached in-process for 30 seconds; the dispatcher
+  invalidates affected pages post-commit on `IncidentCreated` and
+  `IncidentStatusChanged` so changes surface within one tick instead of waiting
+  out the TTL. Admin CRUD lives under `/api/v1/status-pages`; the public
+  endpoint sits outside `/api/v1` so a future auth gate on the admin surface
+  does not lock customers out of the status page.
 - **Slack & Teams channels** — pluggable via `INotificationChannel`. Webhook URLs
   are validated against an HTTPS host allowlist (`hooks.slack.com`,
   `*.webhook.office.com`) at startup via `ValidateOnStart` — a misconfigured
