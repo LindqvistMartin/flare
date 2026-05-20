@@ -4,7 +4,7 @@
 
 [![MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-10-purple.svg)](https://dotnet.microsoft.com)
-[![React](https://img.shields.io/badge/React-18-61dafb.svg)](https://react.dev)
+[![React](https://img.shields.io/badge/React-19-61dafb.svg)](https://react.dev)
 [![CI](https://github.com/LindqvistMartin/flare/actions/workflows/ci.yml/badge.svg)](https://github.com/LindqvistMartin/flare/actions)
 [![Tests](https://img.shields.io/badge/tests-192%20passing-brightgreen.svg)](#)
 
@@ -66,6 +66,28 @@ matview SQL stays fast and independent of event payload format. The matview
 strategy and its scaling path are documented in
 [ADR-004](docs/adr/004-mttr-materialized-views.md).
 
+## Quick start
+
+Backend:
+
+```sh
+dotnet run --project src/Flare.Api
+```
+
+Requires Postgres (see `appsettings.Local.json` for the connection string).
+
+Client:
+
+```sh
+cd client
+npm install
+npm run dev
+```
+
+Then open `http://localhost:5173/#/dashboard`. The client expects the API at
+`http://localhost:5000` (override with the `VITE_API_URL` environment variable).
+The dev server CORS is already wired into `Program.cs`.
+
 ## Backend features
 
 - **Webhook ingestion** — Prometheus, Grafana, PulseWatch, and a Generic adapter
@@ -125,3 +147,8 @@ strategy and its scaling path are documented in
   five minutes via in-memory cache.
 - **Observability** — Serilog JSON logs, OpenTelemetry traces and metrics over
   OTLP, `/metrics` for Prometheus scrape.
+- **React client with realtime dashboard** — Vite + React 19 frontend in
+  `client/`. The dashboard subscribes to the `dashboard` SignalR group; open
+  incidents, MTTR trend, and the active-incidents table refresh without polling.
+  Routes for incident detail, services, action items, and the public status page
+  ship as placeholders this milestone and fill out in follow-ups.
