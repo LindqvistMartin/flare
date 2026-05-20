@@ -9,25 +9,23 @@ import {
   CartesianGrid,
 } from 'recharts'
 import { Card } from '@/components/ui/card'
-import { useMttrTrend30d } from '@/api/hooks/useMetrics'
+import { useDashboardSummary, useMttrTrend30d } from '@/api/hooks/useMetrics'
 import { computeMttrTrendDelta } from '@/lib/mttrTrend'
-
-function formatMs(ms: number | null | undefined): string {
-  if (ms == null) return '—'
-  if (ms < 60_000) return `${Math.round(ms / 1000)}s`
-  if (ms < 3_600_000) return `${Math.round(ms / 60_000)}m`
-  return `${(ms / 3_600_000).toFixed(1)}h`
-}
+import { formatMs } from '@/lib/format'
 
 export function MttrTrendChart() {
-  const { data, isLoading } = useMttrTrend30d()
+  const { data: points, isLoading, isError } = useMttrTrend30d()
+  const { data: summary } = useDashboardSummary()
 
-  const points = data ?? []
-  const valuesWithData = points.filter(p => p.avgMttrMs != null)
-  const overallAvg = valuesWithData.length
-    ? valuesWithData.reduce((sum, p) => sum + (p.avgMttrMs ?? 0), 0) / valuesWithData.length
-    : null
-  const delta = useMemo(() => computeMttrTrendDelta(points), [points])
+  const series = points ?? []
+  const valuesWithData = series.filter(p => p.avgMttrMs != null)
+  const delta = useMemo(() => computeMttrTrendDelta(series), [series])
+
+  // Headline number comes from the backend dashboard summary so the value above
+  // the chart matches the value shown in the StatCard row. Computing it from
+  // daily means here would be mean-of-means, which disagrees with the summary's
+  // per-service-weighted average and confuses the reader.
+  const headline = summary?.mttrLast30dAvgMs ?? null
 
   return (
     <Card className="overflow-hidden">
@@ -37,7 +35,7 @@ export function MttrTrendChart() {
         </p>
         <div className="mt-2 flex items-baseline gap-2">
           <span className="font-mono text-2xl font-medium tabular-nums text-foreground">
-            {formatMs(overallAvg)}
+            {formatMs(headline)}
           </span>
           {delta !== null && (
             <span
@@ -54,15 +52,23 @@ export function MttrTrendChart() {
         </div>
       </div>
       <div className="h-44 px-2 pt-2 pb-2">
-        {isLoading || valuesWithData.length === 0 ? (
+        {isLoading ? (
+          <div className="flex h-full items-center justify-center">
+            <p className="font-mono text-xs text-muted-foreground">Loading…</p>
+          </div>
+        ) : isError ? (
+          <div className="flex h-full items-center justify-center">
+            <p className="font-mono text-xs text-muted-foreground">Trend unavailable</p>
+          </div>
+        ) : valuesWithData.length === 0 ? (
           <div className="flex h-full items-center justify-center">
             <p className="font-mono text-xs text-muted-foreground">
-              {isLoading ? 'Loading…' : 'No resolved incidents in window'}
+              No resolved incidents in window
             </p>
           </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={points} margin={{ top: 8, right: 12, left: 0, bottom: 8 }}>
+            <LineChart data={series} margin={{ top: 8, right: 12, left: 0, bottom: 8 }}>
               <CartesianGrid strokeDasharray="2 4" stroke="var(--border)" vertical={false} />
               <XAxis
                 dataKey="day"

@@ -1,4 +1,3 @@
-import { useMemo } from 'react'
 import { HubConnectionState } from '@microsoft/signalr'
 import { AppShell, type ConnectionStatus } from '@/components/AppShell'
 import { StatCard } from '@/components/StatCard'
@@ -8,7 +7,8 @@ import { useIncidents } from '@/api/hooks/useIncidents'
 import { useServices } from '@/api/hooks/useServices'
 import { useDashboardSummary } from '@/api/hooks/useMetrics'
 import { useActionItems } from '@/api/hooks/useActionItems'
-import { useFlareHub, type FlareScope } from '@/hooks/useFlareHub'
+import { useFlareHub } from '@/hooks/useFlareHub'
+import { formatMs } from '@/lib/format'
 
 function mapConnection(state: HubConnectionState): ConnectionStatus {
   if (state === HubConnectionState.Connected) return 'connected'
@@ -18,18 +18,8 @@ function mapConnection(state: HubConnectionState): ConnectionStatus {
   return 'disconnected'
 }
 
-function formatMs(ms: number | null | undefined): string {
-  if (!ms) return '0s'
-  if (ms < 60_000) return `${Math.round(ms / 1000)}s`
-  if (ms < 3_600_000) return `${Math.round(ms / 60_000)}m`
-  return `${(ms / 3_600_000).toFixed(1)}h`
-}
-
-const DASHBOARD_SCOPE: FlareScope = { kind: 'dashboard' }
-
 export function DashboardPage() {
-  const scope = useMemo(() => DASHBOARD_SCOPE, [])
-  const { connectionState } = useFlareHub(scope)
+  const { connectionState } = useFlareHub('dashboard')
   const { data: incidents, isFetching: incidentsLoading } = useIncidents()
   const { data: services } = useServices()
   const { data: summary } = useDashboardSummary()
@@ -42,6 +32,7 @@ export function DashboardPage() {
 
   const openCount = summary?.openIncidentsCount ?? activeIncidents.length
   const overdueCount = summary?.overdueActionItemsCount ?? overdue.length
+  const summaryLoaded = summary !== undefined
 
   return (
     <AppShell connectionStatus={mapConnection(connectionState)}>
@@ -49,14 +40,14 @@ export function DashboardPage() {
         <div>
           <h1 className="text-lg font-semibold tracking-tight text-foreground">Operations</h1>
           <p className="mt-0.5 font-mono text-[11px] text-muted-foreground">
-            Live incident overview · refreshes via SignalR
+            Open incidents and MTTR refresh live via SignalR · action items poll
           </p>
         </div>
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <StatCard
             eyebrow="Open"
-            value={openCount}
+            value={summaryLoaded ? openCount : '—'}
             sublabel="incidents"
             tone={openCount > 0 ? 'warning' : 'positive'}
           />
@@ -74,7 +65,7 @@ export function DashboardPage() {
           />
           <StatCard
             eyebrow="Overdue"
-            value={overdueCount}
+            value={summaryLoaded ? overdueCount : '—'}
             sublabel="action items"
             tone={overdueCount > 0 ? 'warning' : 'default'}
           />

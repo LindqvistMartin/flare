@@ -1,42 +1,46 @@
 import { useEffect, useState } from 'react'
-import { HubConnectionBuilder, HubConnectionState } from '@microsoft/signalr'
-import { useQueryClient } from '@tanstack/react-query'
+import { HubConnectionBuilder, HubConnectionState, type HubConnection } from '@microsoft/signalr'
+import { useQueryClient, type QueryClient } from '@tanstack/react-query'
 
-export type FlareScope =
-  | { kind: 'dashboard' }
-  | { kind: 'incident'; id: string }
+export type FlareHubScope = 'dashboard' | 'incident'
 
 interface FlareHubResult {
   connectionState: HubConnectionState
 }
 
-// Hub event payloads are sent as raw JSON strings from NotificationDispatcher
-// (PascalCase fields IncidentId / Type / EventId), so the parsing helper below
-// accepts either the legacy quoted string form or the plain-object form for
-// forward compatibility.
+// NotificationDispatcher writes payload via JsonSerializer.Serialize(anon) which
+// emits PascalCase. ASP.NET Core endpoints serialise camelCase via the web
+// defaults, but outbox payloads go on the wire verbatim.
 function parsePayload(raw: unknown): Record<string, unknown> | null {
   if (raw == null) return null
   if (typeof raw === 'object') return raw as Record<string, unknown>
-  if (typeof raw === 'string') {
-    try {
-      const parsed: unknown = JSON.parse(raw)
-      return typeof parsed === 'object' && parsed !== null
-        ? (parsed as Record<string, unknown>)
-        : null
-    } catch {
-      return null
-    }
+  if (typeof raw !== 'string') return null
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    return typeof parsed === 'object' && parsed !== null
+      ? (parsed as Record<string, unknown>)
+      : null
+  } catch {
+    return null
   }
-  return null
 }
 
 function readIncidentId(payload: Record<string, unknown> | null): string | null {
-  if (!payload) return null
-  const value = payload['IncidentId'] ?? payload['incidentId']
+  const value = payload?.['IncidentId']
   return typeof value === 'string' ? value : null
 }
 
-export function useFlareHub(scope: FlareScope): FlareHubResult {
+// Lists that must refresh when any incident is created or transitions state.
+function invalidateIncidentLists(qc: QueryClient): void {
+  void qc.invalidateQueries({ queryKey: ['incidents'] })
+  void qc.invalidateQueries({ queryKey: ['dashboard-summary'] })
+}
+
+// Overload pair so callers can pass primitive args (no object literal that
+// would re-build the effect on every render unless wrapped in useMemo).
+export function useFlareHub(scope: 'dashboard'): FlareHubResult
+export function useFlareHub(scope: 'incident', incidentId: string): FlareHubResult
+export function useFlareHub(scope: FlareHubScope, incidentId?: string): FlareHubResult {
   const [connectionState, setConnectionState] = useState<HubConnectionState>(
     HubConnectionState.Disconnected,
   )
@@ -45,8 +49,9 @@ export function useFlareHub(scope: FlareScope): FlareHubResult {
   useEffect(() => {
     let stopped = false
 
-    const baseUrl = (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:5000'
-    const connection = new HubConnectionBuilder()
+    const baseUrl =
+      (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:5000'
+    const connection: HubConnection = new HubConnectionBuilder()
       .withUrl(baseUrl + '/hubs/flare')
       .withAutomaticReconnect()
       .build()
@@ -63,33 +68,41 @@ export function useFlareHub(scope: FlareScope): FlareHubResult {
 
     connection.on('IncidentCreated', (raw: unknown) => {
       const payload = parsePayload(raw)
-      void queryClient.invalidateQueries({ queryKey: ['incidents'] })
-      void queryClient.invalidateQueries({ queryKey: ['dashboard-summary'] })
-      void queryClient.invalidateQueries({ queryKey: ['mttr-by-service'] })
-      void queryClient.invalidateQueries({ queryKey: ['mttr-trend', '30d'] })
-      const incidentId = readIncidentId(payload)
-      if (incidentId) {
-        void queryClient.invalidateQueries({ queryKey: ['incident', incidentId] })
+      const id = readIncidentId(payload)
+      if (id === null) {
+        // Producer regression — payload should always carry IncidentId. Lists
+        // still refresh, but a missing id is worth logging so a backend rollback
+        // does not go silent.
+        console.warn('IncidentCreated payload missing IncidentId', raw)
+      }
+      invalidateIncidentLists(queryClient)
+      // IncidentCreated cannot change the resolved-incident series, so the
+      // MTTR trend deliberately does not refetch here.
+      if (id !== null) {
+        void queryClient.invalidateQueries({ queryKey: ['incident', id] })
       }
     })
 
     connection.on('IncidentStatusChanged', (raw: unknown) => {
       const payload = parsePayload(raw)
-      void queryClient.invalidateQueries({ queryKey: ['incidents'] })
-      void queryClient.invalidateQueries({ queryKey: ['dashboard-summary'] })
-      void queryClient.invalidateQueries({ queryKey: ['mttr-by-service'] })
+      const id = readIncidentId(payload)
+      if (id === null) {
+        console.warn('IncidentStatusChanged payload missing IncidentId', raw)
+      }
+      invalidateIncidentLists(queryClient)
+      // Transition to/from Resolved shifts the MTTR series, so refetch the
+      // trend on every status change rather than gambling on the `To` field.
       void queryClient.invalidateQueries({ queryKey: ['mttr-trend', '30d'] })
-      const incidentId = readIncidentId(payload)
-      if (incidentId) {
-        void queryClient.invalidateQueries({ queryKey: ['incident', incidentId] })
+      if (id !== null) {
+        void queryClient.invalidateQueries({ queryKey: ['incident', id] })
       }
     })
 
     connection.on('IncidentEventAdded', (raw: unknown) => {
       const payload = parsePayload(raw)
-      const incidentId = readIncidentId(payload)
-      if (incidentId) {
-        void queryClient.invalidateQueries({ queryKey: ['incident-events', incidentId] })
+      const id = readIncidentId(payload)
+      if (id !== null) {
+        void queryClient.invalidateQueries({ queryKey: ['incident-events', id] })
       }
     })
 
@@ -100,10 +113,13 @@ export function useFlareHub(scope: FlareScope): FlareHubResult {
       .then(() => {
         if (stopped) return
         setConnectionState(HubConnectionState.Connected)
-        if (scope.kind === 'dashboard') {
+        if (scope === 'dashboard') {
           return connection.invoke('JoinDashboard')
         }
-        return connection.invoke('JoinIncident', scope.id)
+        if (incidentId !== undefined) {
+          return connection.invoke('JoinIncident', incidentId)
+        }
+        return undefined
       })
       .catch(() => {
         if (!stopped) setConnectionState(HubConnectionState.Disconnected)
@@ -116,14 +132,16 @@ export function useFlareHub(scope: FlareScope): FlareHubResult {
       connection.off('IncidentEventAdded')
       if (connection.state === HubConnectionState.Connected) {
         const leave =
-          scope.kind === 'dashboard'
+          scope === 'dashboard'
             ? connection.invoke('LeaveDashboard')
-            : connection.invoke('LeaveIncident', scope.id)
+            : incidentId !== undefined
+              ? connection.invoke('LeaveIncident', incidentId)
+              : Promise.resolve()
         void leave.catch(() => {})
       }
       void connection.stop()
     }
-  }, [scope, queryClient])
+  }, [scope, incidentId, queryClient])
 
   return { connectionState }
 }

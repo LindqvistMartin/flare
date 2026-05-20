@@ -59,22 +59,6 @@ export type DashboardSummary = {
   mttrLast30dAvgMs: number
 }
 
-export type ServiceMttrRow = {
-  serviceId: string
-  serviceName: string
-  incidentCount: number
-  avgMttrMs: number
-  p50MttrMs: number
-}
-
-export type ServiceMttaRow = {
-  serviceId: string
-  serviceName: string
-  incidentCount: number
-  avgMttaMs: number
-  p50MttaMs: number
-}
-
 // Filter parameters for GET /api/v1/incidents.
 export type IncidentFilter = {
   status?: IncidentStatus

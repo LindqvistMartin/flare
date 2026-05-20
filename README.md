@@ -71,10 +71,14 @@ strategy and its scaling path are documented in
 Backend:
 
 ```sh
+cp src/Flare.Api/appsettings.Local.example.json src/Flare.Api/appsettings.Local.json
+# Edit the connection string inside (or export ConnectionStrings__Postgres),
+# then:
 dotnet run --project src/Flare.Api
 ```
 
-Requires Postgres (see `appsettings.Local.json` for the connection string).
+`appsettings.Local.json` is gitignored. The example file is the canonical
+template; the environment variable form is preferred in containers.
 
 Client:
 

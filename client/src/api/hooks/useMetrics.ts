@@ -1,30 +1,23 @@
 import { useQuery } from '@tanstack/react-query'
 import api from '@/api/client'
-import type { DashboardSummary, Incident, ServiceMttrRow } from '@/api/types'
+import type { DashboardSummary, Incident } from '@/api/types'
 import { bucketIncidentsToMttrTrend, type MttrTrendPoint } from '@/lib/mttrTrend'
 
 export function useDashboardSummary() {
   return useQuery({
     queryKey: ['dashboard-summary'],
-    queryFn: () =>
-      api.get<DashboardSummary>('/api/v1/metrics/dashboard').then(r => r.data),
+    queryFn: () => api.get<DashboardSummary>('/api/v1/metrics/dashboard').then(r => r.data),
   })
 }
 
-export function useMttrByService() {
-  return useQuery({
-    queryKey: ['mttr-by-service'],
-    queryFn: () =>
-      api.get<ServiceMttrRow[]>('/api/v1/metrics/mttr').then(r => r.data),
-    initialData: [],
-    initialDataUpdatedAt: 0,
-  })
-}
-
-// Client-side bucketing until a /metrics/mttr/trend endpoint ships. Fetches
-// resolved incidents (server returns at most a few hundred per organisation
-// today; revisit when the table grows past ~10k rows) and folds them into a
-// 30-day daily-average series.
+// Client-side bucketing until a `/metrics/mttr/trend` endpoint ships. Fetches
+// resolved incidents and folds them into a 30-day daily-average series.
+//
+// Backend `GET /api/v1/incidents?status=Resolved` has no `since` filter today,
+// so payload size grows with the resolved-incident table. To keep refetches
+// proportional, staleTime is bumped to 5 minutes and the hub deliberately
+// does *not* invalidate this query on `IncidentCreated` — creation cannot
+// shift a resolved-incident series, only `IncidentStatusChanged` does.
 export function useMttrTrend30d() {
   return useQuery<MttrTrendPoint[]>({
     queryKey: ['mttr-trend', '30d'],
@@ -34,6 +27,6 @@ export function useMttrTrend30d() {
       })
       return bucketIncidentsToMttrTrend(data)
     },
-    staleTime: 60_000,
+    staleTime: 5 * 60_000,
   })
 }

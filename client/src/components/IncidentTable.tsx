@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import {
   Table,
   TableBody,
@@ -36,7 +37,7 @@ interface IncidentTableProps {
 }
 
 export function IncidentTable({ incidents, services, loading }: IncidentTableProps) {
-  const serviceMap = new Map(services.map(s => [s.id, s]))
+  const serviceMap = useMemo(() => new Map(services.map(s => [s.id, s])), [services])
 
   if (loading && incidents.length === 0) {
     return (
