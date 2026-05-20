@@ -17,8 +17,10 @@ export function MttrTrendChart() {
   const { data: points, isLoading, isError } = useMttrTrend30d()
   const { data: summary } = useDashboardSummary()
 
-  const series = points ?? []
-  const valuesWithData = series.filter(p => p.avgMttrMs != null)
+  // Stable ref so downstream useMemo doesn't recompute every render when
+  // `points` is undefined (which produces a fresh `[]` each call).
+  const series = useMemo(() => points ?? [], [points])
+  const valuesWithData = useMemo(() => series.filter(p => p.avgMttrMs != null), [series])
   const delta = useMemo(() => computeMttrTrendDelta(series), [series])
 
   // Headline number comes from the backend dashboard summary so the value above
@@ -26,6 +28,11 @@ export function MttrTrendChart() {
   // daily means here would be mean-of-means, which disagrees with the summary's
   // per-service-weighted average and confuses the reader.
   const headline = summary?.mttrLast30dAvgMs ?? null
+
+  // Delta is computed from the trend series; the headline is from summary.
+  // Suppress the delta until summary lands so the two numbers cannot disagree
+  // on screen during the loading window.
+  const showDelta = delta !== null && summary !== undefined
 
   return (
     <Card className="overflow-hidden">
@@ -37,7 +44,7 @@ export function MttrTrendChart() {
           <span className="font-mono text-2xl font-medium tabular-nums text-foreground">
             {formatMs(headline)}
           </span>
-          {delta !== null && (
+          {showDelta && (
             <span
               className={
                 delta < 0

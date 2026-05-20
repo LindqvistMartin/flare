@@ -77,10 +77,9 @@ export function useFlareHub(scope: FlareHubScope, incidentId?: string): FlareHub
       }
       invalidateIncidentLists(queryClient)
       // IncidentCreated cannot change the resolved-incident series, so the
-      // MTTR trend deliberately does not refetch here.
-      if (id !== null) {
-        void queryClient.invalidateQueries({ queryKey: ['incident', id] })
-      }
+      // MTTR trend deliberately does not refetch here. The dispatcher also
+      // only broadcasts this event to the dashboard group (not incident:{id}),
+      // so no incident-scoped subscriber exists for a freshly created id.
     })
 
     connection.on('IncidentStatusChanged', (raw: unknown) => {
