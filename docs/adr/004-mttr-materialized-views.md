@@ -116,11 +116,13 @@ under all three steps — the API shape does not change.
 
 ## Verification
 
-- `MetricsAggregatorTests` exercises the refresh path against a real
-  Postgres container.
-- Integration tests over `/api/v1/metrics/mttr` and `/dashboard` seed
-  incidents, refresh, and assert the returned aggregates match the seeded
-  data.
 - The CI fixture's `CleanAsync` issues `REFRESH MATERIALIZED VIEW
   CONCURRENTLY` for both views after each `TRUNCATE` so per-test state is
-  consistent.
+  consistent — proves the refresh path stays healthy as the schema and the
+  surrounding data graph evolve.
+- Matview math was smoke-tested via `psql` inside the Postgres container
+  when the migration first landed: synthetic incidents with known resolve
+  and acknowledge gaps, then `SELECT * FROM mttr_by_service_30d` /
+  `mtta_by_service_30d` to confirm the aggregate matched. Dedicated
+  `MetricsAggregator` and `/api/v1/metrics` integration tests are on the
+  test-coverage backlog rather than shipped today.

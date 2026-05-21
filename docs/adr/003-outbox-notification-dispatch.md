@@ -190,8 +190,11 @@ content).
 
 - **No broadcast for `RoleAssigned` yet.** `POST /api/v1/incidents/{id}/roles`
   writes an `IncidentEvent` but no outbox row, so an `incident:{id}` subscriber
-  only learns about role changes on the next refetch. Will close together with
-  the frontend timeline that consumes it.
+  only learns about role changes on the next refetch. The frontend timeline
+  that consumes the group is now shipped, so closing this gap (one extra
+  `OutboxMessage` write inside the same `SaveChangesAsync` as the
+  `IncidentEvent`, dispatcher already routes by `Type`) is a small, isolated
+  follow-up rather than a coupled change.
 - **No hub auth.** `FlareHub.JoinIncident(Guid)` accepts any caller. Acceptable
   while authentication is deferred (see project concept's scope guards);
   revisit when auth lands.
