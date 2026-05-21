@@ -16,14 +16,14 @@ import type { IncidentEvent } from '@/api/types'
 // landing before a client bump renders sensibly instead of disappearing.
 export function iconForEventType(type: string): LucideIcon {
   switch (type) {
-    case 'Created':              return AlertCircle
-    case 'StatusChanged':        return ArrowRightCircle
-    case 'RoleAssigned':         return UserCheck
-    case 'CommentAdded':         return MessageSquare
-    case 'SeverityChanged':      return ShieldAlert
+    case 'Created':                return AlertCircle
+    case 'StatusChanged':          return ArrowRightCircle
+    case 'RoleAssigned':           return UserCheck
+    case 'CommentAdded':           return MessageSquare
+    case 'SeverityChanged':        return ShieldAlert
     case 'NotificationDispatched': return Radio
-    case 'IngestedFromWebhook':  return Webhook
-    default:                     return Activity
+    case 'WebhookReceived':        return Webhook
+    default:                       return Activity
   }
 }
 
@@ -74,7 +74,9 @@ export function summarizeEvent(event: IncidentEvent): string {
     }
 
     case 'CommentAdded': {
-      const body = payload ? readString(payload, 'comment') ?? readString(payload, 'body') : null
+      // `comment` is the canonical key. CommentComposer writes it; the backend
+      // PostmortemDraftBuilder reads the same key case-insensitively.
+      const body = payload ? readString(payload, 'comment') : null
       if (!body) return 'Comment added'
       // Single-line cap so a multi-paragraph comment does not bloat the row.
       const oneLine = body.replace(/\s+/g, ' ').trim()
@@ -91,7 +93,7 @@ export function summarizeEvent(event: IncidentEvent): string {
       return channel ? `Notification dispatched to ${channel}` : 'Notification dispatched'
     }
 
-    case 'IngestedFromWebhook': {
+    case 'WebhookReceived': {
       const source = payload ? readString(payload, 'source') : null
       return source ? `Ingested from ${source}` : 'Ingested from webhook'
     }
@@ -102,6 +104,6 @@ export function summarizeEvent(event: IncidentEvent): string {
 }
 
 export function shortActor(actorId: string | null): string {
-  if (actorId === null || actorId === '') return 'system'
+  if (actorId === null) return 'system'
   return actorId.slice(0, 8)
 }

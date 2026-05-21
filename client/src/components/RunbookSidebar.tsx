@@ -6,6 +6,12 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
+// Security model for runbook rendering: react-markdown v9 treats raw HTML in
+// the markdown source as plain text by default, and the GFM remark plugin only
+// adds syntax features (tables, task lists, strikethrough) — it does not
+// enable raw HTML. We deliberately do NOT install rehype-raw. A `<script>`
+// payload in a runbook surfaces as literal text in the DOM. Any future opt-in
+// of rehype-raw must add a sanitiser (rehype-sanitize) in the same change.
 interface RunbookSidebarProps {
   serviceName: string | undefined
   runbookBody: string | undefined

@@ -20,6 +20,7 @@ function makeEvent(partial: Partial<IncidentEvent>): IncidentEvent {
 
 describe('iconForEventType', () => {
   it('returns a component for every known event type', () => {
+    // Mirrors IncidentEventType in src/Flare.Core/Entities/IncidentEvent.cs.
     const types = [
       'Created',
       'StatusChanged',
@@ -27,7 +28,7 @@ describe('iconForEventType', () => {
       'CommentAdded',
       'SeverityChanged',
       'NotificationDispatched',
-      'IngestedFromWebhook',
+      'WebhookReceived',
     ]
     for (const t of types) {
       expect(typeof iconForEventType(t)).toBe('object')
@@ -96,12 +97,26 @@ describe('summarizeEvent', () => {
 })
 
 describe('shortActor', () => {
-  it('returns "system" for null and empty', () => {
+  it('returns "system" for null', () => {
     expect(shortActor(null)).toBe('system')
-    expect(shortActor('')).toBe('system')
   })
 
   it('truncates GUIDs to 8 chars', () => {
     expect(shortActor('d1234567-89ab-cdef-0123-456789abcdef')).toBe('d1234567')
+  })
+})
+
+describe('summarizeEvent — WebhookReceived', () => {
+  it('renders source when present', () => {
+    expect(
+      summarizeEvent({
+        id: 'e1',
+        incidentId: 'i1',
+        type: 'WebhookReceived',
+        actorId: null,
+        payload: JSON.stringify({ source: 'prometheus' }),
+        createdAt: '2026-05-21T10:00:00.000Z',
+      }),
+    ).toBe('Ingested from prometheus')
   })
 })

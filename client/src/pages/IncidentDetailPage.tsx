@@ -1,6 +1,8 @@
+import { useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { HubConnectionState } from '@microsoft/signalr'
 import { ArrowLeft } from 'lucide-react'
+import { toast } from 'sonner'
 import { AppShell, type ConnectionStatus } from '@/components/AppShell'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -14,7 +16,7 @@ import { useIncident } from '@/api/hooks/useIncidents'
 import { useIncidentEvents } from '@/api/hooks/useIncidentEvents'
 import { useService } from '@/api/hooks/useServices'
 import { useFlareHub } from '@/hooks/useFlareHub'
-import { formatIncidentDuration } from '@/lib/format'
+import { formatIncidentDuration, formatTimestampUtc } from '@/lib/format'
 
 function mapConnection(state: HubConnectionState): ConnectionStatus {
   if (state === HubConnectionState.Connected) return 'connected'
@@ -24,7 +26,10 @@ function mapConnection(state: HubConnectionState): ConnectionStatus {
   return 'disconnected'
 }
 
-const VALID_GUID_RE = /^[0-9a-fA-F-]{36}$/
+// Canonical 8-4-4-4-12 hex pattern. Permissive `[0-9a-fA-F-]{36}` would accept
+// 36 dashes; the backend would reject it but a junior tell to leak past the
+// router boundary.
+const VALID_GUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export function IncidentDetailPage() {
   const { id = '' } = useParams<{ id: string }>()
@@ -35,6 +40,17 @@ export function IncidentDetailPage() {
   const incident = incidentQuery.data
   const eventsQuery = useIncidentEvents(guidLike ? id : null)
   const serviceQuery = useService(incident?.serviceId ?? null)
+
+  // Surface background refresh failures: when cached data is on screen but the
+  // SignalR-triggered refetch errors, the user otherwise sees no signal that
+  // the timeline could be stale. Toast dedupes per incident id.
+  useEffect(() => {
+    if (incidentQuery.isError && incident) {
+      toast.error('Incident refresh failed — data may be stale', {
+        id: `incident-${id}-refetch`,
+      })
+    }
+  }, [incidentQuery.isError, incident, id])
 
   const connectionStatus = mapConnection(connectionState)
 
@@ -82,7 +98,7 @@ export function IncidentDetailPage() {
               {incident.title}
             </h1>
             <p className="font-mono text-[11px] text-muted-foreground">
-              {serviceQuery.data?.name ?? '…'} · opened {new Date(incident.createdAt).toISOString().slice(0, 16).replace('T', ' ')}Z
+              {serviceQuery.data?.name ?? '…'} · opened {formatTimestampUtc(incident.createdAt)}
             </p>
           </div>
           <StatusTransitionControl
@@ -101,7 +117,11 @@ export function IncidentDetailPage() {
               </h2>
               <IncidentTimeline
                 events={eventsQuery.data}
-                loading={eventsQuery.isFetching && eventsQuery.data.length === 0}
+                // `isFetched` flips true on the first settled fetch (success
+                // OR error) and stays true; using `isFetching && data.empty`
+                // would re-show the loading state on every refocus refetch
+                // against a legitimately empty timeline.
+                loading={!eventsQuery.isFetched}
               />
             </section>
 

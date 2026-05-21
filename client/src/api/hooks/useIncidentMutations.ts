@@ -22,13 +22,22 @@ function problemDetail(err: unknown, fallback: string): string {
   return fallback
 }
 
-// Optimistic update with rollback on 422. The dispatcher's IncidentStatusChanged
-// broadcast also lands and invalidates ['incident', id]; the resulting refetch
-// converges on the same canonical state the mutation's onSuccess returned,
-// so the SignalR echo is a no-op rather than a flicker.
+// All three mutations share a per-incident scope id so TanStack serialises
+// concurrent .mutate() calls against the same incident. A user spamming the
+// transition dropdown or rapidly clicking role assigns will not race the
+// cache — each mutation runs once the previous one has settled, which keeps
+// optimistic snapshots from clobbering each other.
+function mutationScope(incidentId: string) {
+  return { id: `incident:${incidentId}` }
+}
+
+// Optimistic transition. The mutation onSuccess writes the canonical server
+// response into the cache, so the SignalR echo (which also invalidates the
+// same key) lands on already-correct data and refetches harmlessly.
 export function useTransitionIncident(incidentId: string) {
   const qc = useQueryClient()
   return useMutation({
+    scope: mutationScope(incidentId),
     mutationFn: (vars: TransitionVars) =>
       api
         .post<Incident>(`/api/v1/incidents/${incidentId}/transition`, { to: vars.to })
@@ -41,6 +50,9 @@ export function useTransitionIncident(incidentId: string) {
       }
       return { previous }
     },
+    onSuccess: (incident) => {
+      qc.setQueryData(['incident', incidentId], incident)
+    },
     onError: (err, _vars, ctx) => {
       if (ctx?.previous) {
         qc.setQueryData(['incident', incidentId], ctx.previous)
@@ -48,7 +60,9 @@ export function useTransitionIncident(incidentId: string) {
       toast.error(problemDetail(err, 'Transition rejected'))
     },
     onSettled: () => {
-      void qc.invalidateQueries({ queryKey: ['incident', incidentId] })
+      // Dashboard list still needs to know about the new status; the
+      // ['incident', id] key is already accurate via onSuccess + SignalR echo
+      // so we deliberately do not double-invalidate it.
       void qc.invalidateQueries({ queryKey: ['incidents'] })
     },
   })
@@ -62,6 +76,7 @@ interface AssignRoleVars {
 export function useAssignRole(incidentId: string) {
   const qc = useQueryClient()
   return useMutation({
+    scope: mutationScope(incidentId),
     mutationFn: (vars: AssignRoleVars) =>
       api
         .post<Incident>(`/api/v1/incidents/${incidentId}/roles`, {
@@ -79,14 +94,20 @@ export function useAssignRole(incidentId: string) {
   })
 }
 
+// Mirrors AllowedExternalEventTypes in src/Flare.Api/Endpoints/IncidentsEndpoints.cs.
+// Severity-change UI lands in a follow-up; widening the union now avoids a
+// shotgun edit when the second producer appears.
+type ExternalEventType = 'CommentAdded' | 'SeverityChanged'
+
 interface AddEventVars {
-  type: 'CommentAdded'
+  type: ExternalEventType
   payload: string
 }
 
 export function useAddIncidentEvent(incidentId: string) {
   const qc = useQueryClient()
   return useMutation({
+    scope: mutationScope(incidentId),
     mutationFn: (vars: AddEventVars) =>
       api
         .post<IncidentEvent>(`/api/v1/incidents/${incidentId}/events`, vars)

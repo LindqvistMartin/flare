@@ -1,3 +1,4 @@
+import { useCallback } from 'react'
 import { ArrowRight } from 'lucide-react'
 import {
   Select,
@@ -21,14 +22,24 @@ export function StatusTransitionControl({ incidentId, currentStatus }: StatusTra
   const next = allowedNextStatuses(currentStatus)
   const terminal = isTerminalStatus(currentStatus)
 
+  const onValueChange = useCallback(
+    (value: string) => transition.mutate({ to: value as IncidentStatus }),
+    [transition],
+  )
+
   return (
     <div className="flex items-center gap-2">
       <StatusChip status={currentStatus} />
       <ArrowRight className="h-3 w-3 text-muted-foreground" aria-hidden />
+      {/* The Select is uncontrolled: a fresh key remounts it whenever the
+          incident transitions (via onSuccess or SignalR echo), so the trigger
+          shows the placeholder again instead of holding the user's last pick.
+          Controlled `value=""` would have Radix dedupe same-value picks; the
+          remount sidesteps that fragility entirely. */}
       <Select
+        key={`transition-${currentStatus}`}
         disabled={terminal || transition.isPending}
-        onValueChange={value => transition.mutate({ to: value as IncidentStatus })}
-        value=""
+        onValueChange={onValueChange}
       >
         <SelectTrigger
           className="h-7 w-40 font-mono text-[11px]"

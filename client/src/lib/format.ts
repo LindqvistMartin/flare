@@ -21,3 +21,10 @@ export function formatIncidentDuration(
   const end = resolvedAt ? new Date(resolvedAt).getTime() : now.getTime()
   return formatMs(Math.max(0, end - start))
 }
+
+// UTC-tagged human-readable timestamp ("2026-05-21 15:58Z") for incident
+// header lines and similar metadata strings. Trailing Z makes the timezone
+// unambiguous without dragging Intl in for a portfolio-scope UI.
+export function formatTimestampUtc(iso: string): string {
+  return `${new Date(iso).toISOString().slice(0, 16).replace('T', ' ')}Z`
+}

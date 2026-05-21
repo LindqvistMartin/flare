@@ -10,7 +10,10 @@ interface FlareHubResult {
 
 // NotificationDispatcher writes payload via JsonSerializer.Serialize(anon) which
 // emits PascalCase. ASP.NET Core endpoints serialise camelCase via the web
-// defaults, but outbox payloads go on the wire verbatim.
+// defaults, but outbox payloads go on the wire verbatim. The keys here mirror
+// the producer-side anon-object property names — keep them in sync.
+const PAYLOAD_KEYS = { incidentId: 'IncidentId' } as const
+
 function parsePayload(raw: unknown): Record<string, unknown> | null {
   if (raw == null) return null
   if (typeof raw === 'object') return raw as Record<string, unknown>
@@ -26,8 +29,14 @@ function parsePayload(raw: unknown): Record<string, unknown> | null {
 }
 
 function readIncidentId(payload: Record<string, unknown> | null): string | null {
-  const value = payload?.['IncidentId']
+  const value = payload?.[PAYLOAD_KEYS.incidentId]
   return typeof value === 'string' ? value : null
+}
+
+function warnMissingId(event: string, raw: unknown): void {
+  if (import.meta.env.DEV) {
+    console.warn(`${event} payload missing ${PAYLOAD_KEYS.incidentId}`, raw)
+  }
 }
 
 // Lists that must refresh when any incident is created or transitions state.
@@ -71,9 +80,9 @@ export function useFlareHub(scope: FlareHubScope, incidentId?: string): FlareHub
       const id = readIncidentId(payload)
       if (id === null) {
         // Producer regression — payload should always carry IncidentId. Lists
-        // still refresh, but a missing id is worth logging so a backend rollback
-        // does not go silent.
-        console.warn('IncidentCreated payload missing IncidentId', raw)
+        // still refresh, but a missing id is worth surfacing in dev so a
+        // backend rollback does not go silent.
+        warnMissingId('IncidentCreated', raw)
       }
       invalidateIncidentLists(queryClient)
       // IncidentCreated cannot change the resolved-incident series, so the
@@ -86,7 +95,7 @@ export function useFlareHub(scope: FlareHubScope, incidentId?: string): FlareHub
       const payload = parsePayload(raw)
       const id = readIncidentId(payload)
       if (id === null) {
-        console.warn('IncidentStatusChanged payload missing IncidentId', raw)
+        warnMissingId('IncidentStatusChanged', raw)
       }
       invalidateIncidentLists(queryClient)
       // Transition to/from Resolved shifts the MTTR series, so refetch the
