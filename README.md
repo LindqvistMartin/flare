@@ -6,7 +6,7 @@
 [![.NET](https://img.shields.io/badge/.NET-10-purple.svg)](https://dotnet.microsoft.com)
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](https://react.dev)
 [![CI](https://github.com/LindqvistMartin/flare/actions/workflows/ci.yml/badge.svg)](https://github.com/LindqvistMartin/flare/actions)
-[![Tests](https://img.shields.io/badge/tests-192%20passing-brightgreen.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-212%20passing-brightgreen.svg)](#)
 
 ## Architecture
 
@@ -154,5 +154,10 @@ The dev server CORS is already wired into `Program.cs`.
 - **React client with realtime dashboard** — Vite + React 19 frontend in
   `client/`. The dashboard subscribes to the `dashboard` SignalR group; open
   incidents, MTTR trend, and the active-incidents table refresh without polling.
-  Routes for incident detail, services, action items, and the public status page
-  ship as placeholders this milestone and fill out in follow-ups.
+- **Incident detail page** — full timeline feed with per-event icons, status
+  transitions via an allowed-only dropdown (optimistic update with rollback on
+  422), Commander / Communicator / Responder assignment, comment composer with
+  zod validation, and a Markdown runbook sidebar pulled from the linked service.
+  The page subscribes to the `incident:{id}` SignalR group so transitions and
+  events from other operators land without polling. Routes for services,
+  action items, and the public status page still ship as placeholders.

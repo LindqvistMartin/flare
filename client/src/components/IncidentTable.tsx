@@ -12,22 +12,13 @@ import { SeverityBadge } from '@/components/SeverityBadge'
 import { StatusChip } from '@/components/StatusChip'
 import type { Incident, IncidentSeverity, Service } from '@/api/types'
 import { cn } from '@/lib/utils'
+import { formatIncidentDuration } from '@/lib/format'
 
 const severityRibbonClass: Record<IncidentSeverity, string> = {
   Sev1: 'before:bg-red-500',
   Sev2: 'before:bg-amber-500',
   Sev3: 'before:bg-blue-500',
   Sev4: 'before:bg-muted-foreground/30',
-}
-
-function formatDuration(opened: string, resolved: string | null): string {
-  const start = new Date(opened).getTime()
-  const end = resolved ? new Date(resolved).getTime() : Date.now()
-  const ms = Math.max(0, end - start)
-  if (ms < 60_000) return `${Math.round(ms / 1000)}s`
-  if (ms < 3_600_000) return `${Math.round(ms / 60_000)}m`
-  if (ms < 86_400_000) return `${(ms / 3_600_000).toFixed(1)}h`
-  return `${(ms / 86_400_000).toFixed(1)}d`
 }
 
 interface IncidentTableProps {
@@ -110,7 +101,7 @@ export function IncidentTable({ incidents, services, loading }: IncidentTablePro
                   {formatDistanceToNowStrict(new Date(incident.createdAt), { addSuffix: true })}
                 </TableCell>
                 <TableCell className="text-right font-mono text-[11px] tabular-nums text-muted-foreground">
-                  {formatDuration(incident.createdAt, incident.resolvedAt)}
+                  {formatIncidentDuration(incident.createdAt, incident.resolvedAt)}
                 </TableCell>
               </TableRow>
             )
