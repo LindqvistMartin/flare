@@ -16,7 +16,10 @@ public static class PostmortemsEndpoints
     {
         var group = app.MapGroup("/api/v1/incidents/{id:guid}/postmortem");
 
-        group.MapGet("/", async (
+        // Empty path so the route template matches the group prefix exactly.
+        // Using "/" here appends a literal slash and produces a 404 on the
+        // canonical no-trailing-slash URL the rest of the API ships.
+        group.MapGet("", async (
             Guid id,
             FlareDbContext db,
             CancellationToken ct) =>
@@ -100,8 +103,19 @@ public static class PostmortemsEndpoints
                 return Results.Ok(pm.ToResponse());
 
             pm.Publish();
-            await db.SaveChangesAsync(ct);
-            return Results.Ok(pm.ToResponse());
+
+            try
+            {
+                await db.SaveChangesAsync(ct);
+                return Results.Ok(pm.ToResponse());
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                // A concurrent Regenerate landed between our read and write.
+                // The xmin shadow token on Postmortem flagged the row as stale;
+                // surface as 409 so the client retries with fresh state.
+                return Results.Problem(statusCode: 409, title: "Postmortem was modified concurrently");
+            }
         });
 
         return app;

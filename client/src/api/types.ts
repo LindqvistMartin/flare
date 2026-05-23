@@ -66,15 +66,17 @@ export type Postmortem = {
   publishedAt: string | null
 }
 
-// Shape inside Postmortem.timeline (a JSON-serialised array). Mirrors the
-// TimelineEntry record in src/Flare.Core/Services/PostmortemDraftBuilder.cs.
-// PascalCase here because JsonSerializer.Serialize on the anonymous wrapper
-// uses default options, which preserves the C# property casing on the wire.
+// Normalized timeline entry consumed by PostmortemTimeline. The wire shape
+// inside Postmortem.timeline (a JSON-serialised array from
+// src/Flare.Core/Services/PostmortemDraftBuilder.cs) is PascalCase
+// (`At`, `Type`, `ActorId`, `Summary`) because JsonSerializer.Serialize on the
+// anonymous wrapper uses default options. `parsePostmortemTimeline` absorbs
+// that casing drift at the boundary so JSX stays camelCase.
 export type PostmortemTimelineEntry = {
-  At: string
-  Type: string
-  ActorId: string | null
-  Summary: string
+  at: string
+  type: string
+  actorId: string | null
+  summary: string
 }
 
 export type DashboardSummary = {

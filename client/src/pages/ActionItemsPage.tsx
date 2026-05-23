@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { useSearchParams } from 'react-router-dom'
 import { CheckCircle2, Clock } from 'lucide-react'
 import { AppShell } from '@/components/AppShell'
 import { Card, CardContent } from '@/components/ui/card'
@@ -160,13 +160,15 @@ function ActionItemRow({ item, now }: ActionItemRowProps) {
               aria-hidden
             />
           ) : null}
-          <Link
-            to="/dashboard"
-            className="block truncate text-sm text-foreground underline-offset-4 hover:underline"
+          {/* Plain text until /action-items/:id detail view ships. The previous
+              `<Link to="/dashboard">` looked like a real anchor but landed every
+              click on the dashboard — worse than no link. */}
+          <span
+            className="block truncate text-sm text-foreground"
             title={item.title}
           >
             {item.title}
-          </Link>
+          </span>
         </div>
       </TableCell>
       <TableCell>

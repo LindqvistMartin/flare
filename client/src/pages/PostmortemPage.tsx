@@ -1,10 +1,20 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { HubConnectionState } from '@microsoft/signalr'
 import { ArrowLeft, FileText, Send, Sparkles } from 'lucide-react'
 import { AppShell, type ConnectionStatus } from '@/components/AppShell'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { SeverityBadge } from '@/components/SeverityBadge'
 import { PostmortemStatusChip } from '@/components/PostmortemStatusChip'
 import { PostmortemTimeline } from '@/components/PostmortemTimeline'
@@ -18,8 +28,8 @@ import {
 } from '@/api/hooks/usePostmortem'
 import { useFlareHub } from '@/hooks/useFlareHub'
 import { isPostmortemEditable } from '@/lib/postmortemStatus'
+import { parsePostmortemTimeline } from '@/lib/postmortemTimeline'
 import { formatTimestampUtc } from '@/lib/format'
-import type { PostmortemTimelineEntry } from '@/api/types'
 
 function mapConnection(state: HubConnectionState): ConnectionStatus {
   if (state === HubConnectionState.Connected) return 'connected'
@@ -31,46 +41,41 @@ function mapConnection(state: HubConnectionState): ConnectionStatus {
 
 const VALID_GUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-function parseTimeline(raw: string): PostmortemTimelineEntry[] {
-  try {
-    const parsed: unknown = JSON.parse(raw)
-    return Array.isArray(parsed) ? (parsed as PostmortemTimelineEntry[]) : []
-  } catch {
-    return []
-  }
-}
-
 export function PostmortemPage() {
   const { id = '' } = useParams<{ id: string }>()
   const guidLike = VALID_GUID_RE.test(id)
 
+  // The hub subscription is decorative on this page: it powers the connection
+  // chip but does NOT invalidate ['postmortem', id]. The postmortem is a
+  // server-frozen snapshot — fresh events only matter once the user clicks
+  // Regenerate, at which point the mutation rewrites the cache itself.
   const { connectionState } = useFlareHub('incident', id)
   const incidentQuery = useIncident(guidLike ? id : null)
   const incident = incidentQuery.data
   const postmortemQuery = usePostmortem(guidLike ? id : null)
   const postmortem = postmortemQuery.data ?? null
   const serviceQuery = useService(incident?.serviceId ?? null)
-  const actionItemsQuery = useActionItems()
+  const actionItemsQuery = useActionItems(
+    postmortem ? { postmortemId: postmortem.id } : {},
+  )
   const generateMut = useGeneratePostmortem(id)
   const publishMut = usePublishPostmortem(id)
 
-  // Subtle "just generated" highlight on the Impact card. TanStack's
-  // submittedAt is a millisecond timestamp that updates on each successful
-  // mutation submission; using it as a React key remounts the highlighted
-  // div and replays the keyframe. No setState-in-effect dance required.
-  const highlightKey = generateMut.submittedAt
+  // Highlight only after a *successful* generate. Keying off submittedAt alone
+  // would flash the keyframe around an unchanged Impact card when the mutation
+  // failed and the user saw a toast — visual disagreement.
+  const highlightKey = generateMut.isSuccess ? generateMut.submittedAt : 0
 
   const timeline = useMemo(
-    () => (postmortem ? parseTimeline(postmortem.timeline) : []),
+    () => (postmortem ? parsePostmortemTimeline(postmortem.timeline) : []),
     [postmortem],
   )
-  const itemsForPostmortem = useMemo(
-    () => (postmortem ? actionItemsQuery.data.filter(i => i.postmortemId === postmortem.id) : []),
-    [actionItemsQuery.data, postmortem],
-  )
+
+  const [publishOpen, setPublishOpen] = useState(false)
 
   const connectionStatus = mapConnection(connectionState)
-  const loading = !postmortemQuery.isFetched || !incidentQuery.isFetched
+  const initialLoading =
+    !postmortemQuery.isFetched || !incidentQuery.isFetched
 
   if (!guidLike) {
     return (
@@ -129,7 +134,7 @@ export function PostmortemPage() {
             {postmortem && isPostmortemEditable(postmortem.status) && (
               <Button
                 size="sm"
-                onClick={() => publishMut.mutate()}
+                onClick={() => setPublishOpen(true)}
                 disabled={publishMut.isPending}
                 className="font-mono text-[10px] uppercase tracking-wide"
               >
@@ -140,7 +145,7 @@ export function PostmortemPage() {
           </div>
         </div>
 
-        {loading && !postmortem ? (
+        {initialLoading && !postmortem ? (
           <LoadingSkeleton />
         ) : postmortem === null ? (
           <EmptyState
@@ -164,34 +169,87 @@ export function PostmortemPage() {
             </Section>
 
             <Section title="Action items">
-              {itemsForPostmortem.length === 0 ? (
-                <p className="font-mono text-[11px] text-muted-foreground">
-                  No action items yet. Add them on the{' '}
-                  <Link to="/action-items" className="underline-offset-2 hover:underline">
-                    tracker
-                  </Link>
-                  .
-                </p>
-              ) : (
-                <ul className="space-y-1.5">
-                  {itemsForPostmortem.map(item => (
-                    <li
-                      key={item.id}
-                      className="flex items-baseline justify-between gap-3 font-mono text-[11px]"
-                    >
-                      <span className="text-foreground">{item.title}</span>
-                      <span className="text-muted-foreground tabular-nums uppercase tracking-wide">
-                        {item.status}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
+              <ActionItemsSection
+                items={actionItemsQuery.data}
+                ready={actionItemsQuery.isFetched}
+              />
             </Section>
           </div>
         )}
       </div>
+
+      <AlertDialog open={publishOpen} onOpenChange={setPublishOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Publish this postmortem?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Publishing freezes the postmortem permanently. Impact, Timeline, and
+              contributing factors cannot be regenerated or edited after this point.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="font-mono text-[10px] uppercase tracking-wide">
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setPublishOpen(false)
+                publishMut.mutate()
+              }}
+              className="font-mono text-[10px] uppercase tracking-wide"
+            >
+              Publish
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </AppShell>
+  )
+}
+
+interface ActionItemsSectionProps {
+  items: ReturnType<typeof useActionItems>['data']
+  ready: boolean
+}
+
+function ActionItemsSection({ items, ready }: ActionItemsSectionProps) {
+  // Without the readiness gate the initial render — when useActionItems still
+  // serves the empty initialData — would flash the "No action items yet"
+  // copy even on postmortems that have several.
+  if (!ready) {
+    return (
+      <ul className="space-y-1.5">
+        {Array.from({ length: 2 }).map((_, i) => (
+          <li key={i} className="h-4 w-full animate-pulse rounded-sm bg-muted" />
+        ))}
+      </ul>
+    )
+  }
+  if (items.length === 0) {
+    return (
+      <p className="font-mono text-[11px] text-muted-foreground">
+        No action items yet. Add them on the{' '}
+        <Link to="/action-items" className="underline-offset-2 hover:underline">
+          tracker
+        </Link>
+        .
+      </p>
+    )
+  }
+  return (
+    <ul className="space-y-1.5">
+      {items.map(item => (
+        <li
+          key={item.id}
+          className="flex items-baseline justify-between gap-3 font-mono text-[11px]"
+        >
+          <span className="text-foreground">{item.title}</span>
+          <span className="text-muted-foreground tabular-nums uppercase tracking-wide">
+            {item.status}
+          </span>
+        </li>
+      ))}
+    </ul>
   )
 }
 
@@ -203,8 +261,7 @@ interface SectionProps {
 }
 
 function Section({ title, children, highlightKey, span = 1 }: SectionProps) {
-  const className =
-    span === 2 ? 'lg:col-span-2' : ''
+  const className = span === 2 ? 'lg:col-span-2' : ''
   return (
     <Card className={className}>
       <CardContent className="space-y-3 p-4">
@@ -217,7 +274,7 @@ function Section({ title, children, highlightKey, span = 1 }: SectionProps) {
         <div
           key={highlightKey}
           data-highlight={highlightKey !== undefined && highlightKey > 0 ? 'true' : undefined}
-          className="data-[highlight=true]:animate-pm-highlight"
+          className="rounded-md data-[highlight=true]:animate-pm-highlight"
         >
           {children}
         </div>
@@ -227,10 +284,6 @@ function Section({ title, children, highlightKey, span = 1 }: SectionProps) {
 }
 
 function ContributingFactorsPlaceholder() {
-  // RootCause is a non-derived field in the domain entity (PostmortemDraftBuilder
-  // ships an empty string). A hand-editable input lands when the backend gains
-  // a PATCH endpoint; until then the placeholder makes the gap honest instead
-  // of pretending the field is captured.
   return (
     <p className="font-mono text-[11px] text-muted-foreground">
       Contributing factors are not auto-derived from the timeline. The hand-editable form
@@ -303,4 +356,3 @@ function NotFoundCard() {
     </div>
   )
 }
-

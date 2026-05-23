@@ -75,9 +75,16 @@ public static class ActionItemsEndpoints
             return Results.Ok(item.ToResponse());
         });
 
-        app.MapGet("/api/v1/action-items", async (FlareDbContext db, bool? overdue, CancellationToken ct) =>
+        app.MapGet("/api/v1/action-items", async (
+            FlareDbContext db,
+            bool? overdue,
+            Guid? postmortemId,
+            CancellationToken ct) =>
         {
             var query = db.ActionItems.AsQueryable();
+
+            if (postmortemId.HasValue)
+                query = query.Where(a => a.PostmortemId == postmortemId.Value);
 
             if (overdue == true)
             {

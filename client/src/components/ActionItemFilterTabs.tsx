@@ -28,9 +28,12 @@ interface ActionItemFilterTabsProps {
 export function ActionItemFilterTabs({ items, active, onChange, now }: ActionItemFilterTabsProps) {
   const counts = useMemo(() => countByFilter(items, now), [items, now])
 
+  // Plain button group, not a Radix Tabs / aria-tablist composition — there is
+  // no aria-controlled panel relationship, and the visible affordance is filter
+  // selection. `aria-pressed` on each toggle communicates the active state
+  // without promising tab-panel semantics to screen readers.
   return (
     <div
-      role="tablist"
       aria-label="Action item filter"
       className="flex flex-wrap items-center gap-1.5"
     >
@@ -41,8 +44,7 @@ export function ActionItemFilterTabs({ items, active, onChange, now }: ActionIte
           <button
             key={key}
             type="button"
-            role="tab"
-            aria-selected={isActive}
+            aria-pressed={isActive}
             onClick={() => onChange(key)}
             className={cn(
               'group inline-flex items-center gap-2 rounded-sm border px-2.5 py-1 transition-colors',
