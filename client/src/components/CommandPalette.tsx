@@ -1,22 +1,14 @@
 import { useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Command } from 'cmdk'
-import {
-  AlertTriangle,
-  CheckSquare,
-  Globe,
-  Plus,
-  Search,
-  SunMoon,
-} from 'lucide-react'
+import { AlertTriangle, CheckSquare, Search, SunMoon } from 'lucide-react'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { useCommandPalette } from '@/contexts/CommandPaletteContext'
 import { useIncidents } from '@/api/hooks/useIncidents'
 import { useTheme } from '@/contexts/ThemeContext'
 import { SeverityBadge } from '@/components/SeverityBadge'
-import { toast } from 'sonner'
 
-const DEMO_STATUS_SLUG = 'demo'
+const PALETTE_INCIDENT_LIMIT = 20
 
 export function CommandPalette() {
   const { open, setOpen } = useCommandPalette()
@@ -30,7 +22,7 @@ export function CommandPalette() {
     () =>
       [...incidents.data]
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-        .slice(0, 20),
+        .slice(0, PALETTE_INCIDENT_LIMIT),
     [incidents.data],
   )
 
@@ -50,6 +42,7 @@ export function CommandPalette() {
           <div className="flex items-center gap-2 border-b border-border px-3">
             <Search className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
             <Command.Input
+              aria-label="Search commands and incidents"
               placeholder="Search incidents, navigate, toggle…"
               className="flex h-11 w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
             />
@@ -65,23 +58,9 @@ export function CommandPalette() {
               className="px-1 py-1 font-mono text-[10px] tracking-[0.18em] uppercase text-muted-foreground"
             >
               <PaletteAction
-                icon={<Plus className="h-3.5 w-3.5" aria-hidden />}
-                title="New incident"
-                hint="Creation UI ships in a follow-up"
-                onSelect={() => {
-                  toast.info('Incident creation UI lands in a follow-up release.')
-                  close()
-                }}
-              />
-              <PaletteAction
                 icon={<CheckSquare className="h-3.5 w-3.5" aria-hidden />}
                 title="Open action items"
                 onSelect={() => go('/action-items')}
-              />
-              <PaletteAction
-                icon={<Globe className="h-3.5 w-3.5" aria-hidden />}
-                title="View status page (demo)"
-                onSelect={() => go(`/p/${DEMO_STATUS_SLUG}`)}
               />
               <PaletteAction
                 icon={<SunMoon className="h-3.5 w-3.5" aria-hidden />}

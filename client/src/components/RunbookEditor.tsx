@@ -13,11 +13,12 @@ interface RunbookEditorProps {
   dirty?: boolean
 }
 
-// Markdown runbook editor with an Edit / Preview tab toggle. Uses the bundled
-// react-markdown + remark-gfm stack already pulled in for RunbookSidebar.
-// react-markdown's default disallows raw HTML, so a runbook author cannot
-// inject <script> through stored content — same safety posture as the
-// sidebar.
+// Markdown runbook editor with an Edit / Preview tab toggle. Uses
+// @uiw/react-md-editor, which ships its own markdown renderer for the
+// preview pane (not the react-markdown / remark-gfm stack used by
+// RunbookSidebar). Preview is HTML-sanitised by MDEditor's default rehype
+// pipeline — runbook authors can still write fenced code, tables, and
+// headings, but raw <script> is stripped.
 export function RunbookEditor({ value, onChange, saving, dirty }: RunbookEditorProps) {
   const { theme } = useTheme()
   const [mode, setMode] = useState<'edit' | 'preview'>('edit')

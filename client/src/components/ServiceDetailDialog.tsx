@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -20,16 +20,25 @@ interface ServiceDetailDialogProps {
   onOpenChange: (open: boolean) => void
 }
 
-// Outer dialog manages open/close; the body is its own component, keyed by
-// service.id so opening a different service remounts with fresh local state
-// (the runbook draft). That sidesteps the useEffect-resets-state anti-pattern
-// caught by react-hooks/set-state-in-effect.
+// Outer dialog manages open/close and forwards a flush handle to the body so
+// closing with a pending debounced save commits the trailing edit rather than
+// dropping it on unmount. Body is keyed by service.id so opening a different
+// service remounts with fresh local state (the runbook draft).
 export function ServiceDetailDialog({ service, onOpenChange }: ServiceDetailDialogProps) {
+  const flushRef = useRef<(() => void) | null>(null)
+
+  const handleOpenChange = (open: boolean) => {
+    if (!open && flushRef.current) flushRef.current()
+    onOpenChange(open)
+  }
+
   const open = service !== null
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-4xl">
-        {service && <ServiceDetailBody key={service.id} service={service} />}
+        {service && (
+          <ServiceDetailBody key={service.id} service={service} flushRef={flushRef} />
+        )}
       </DialogContent>
     </Dialog>
   )
@@ -37,24 +46,34 @@ export function ServiceDetailDialog({ service, onOpenChange }: ServiceDetailDial
 
 interface ServiceDetailBodyProps {
   service: Service
+  flushRef: React.MutableRefObject<(() => void) | null>
 }
 
 const HISTORY_LIMIT = 10
 
-function ServiceDetailBody({ service }: ServiceDetailBodyProps) {
+function ServiceDetailBody({ service, flushRef }: ServiceDetailBodyProps) {
   const incidents = useIncidents({ serviceId: service.id })
   const mutation = useUpdateServiceRunbook(service.id)
   const [draft, setDraft] = useState<string>(service.runbookBody)
   const dirty = draft !== service.runbookBody
 
-  const fireSave = useDebouncedCallback((body: string) => {
+  const debouncer = useDebouncedCallback((body: string) => {
     if (body === service.runbookBody) return
     mutation.mutate({ runbookBody: body })
   }, 500)
 
+  // Expose the debouncer's flush to the parent dialog so closing the dialog
+  // with a pending save commits the edit instead of cancelling it on unmount.
+  useEffect(() => {
+    flushRef.current = debouncer.flush
+    return () => {
+      flushRef.current = null
+    }
+  }, [debouncer.flush, flushRef])
+
   const handleChange = (next: string) => {
     setDraft(next)
-    fireSave(next)
+    debouncer.call(next)
   }
 
   const history = useMemo(() => {

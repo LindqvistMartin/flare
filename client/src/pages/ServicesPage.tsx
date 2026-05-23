@@ -1,24 +1,39 @@
 import { useMemo, useState } from 'react'
-import { AppShell } from '@/components/AppShell'
+import { HubConnectionState } from '@microsoft/signalr'
+import { AppShell, type ConnectionStatus } from '@/components/AppShell'
 import { Card, CardContent } from '@/components/ui/card'
 import { ServiceCard } from '@/components/ServiceCard'
 import { ServiceDetailDialog } from '@/components/ServiceDetailDialog'
 import { useServices } from '@/api/hooks/useServices'
 import { useIncidents } from '@/api/hooks/useIncidents'
+import { useFlareHub } from '@/hooks/useFlareHub'
 import type { Incident, Service } from '@/api/types'
+
+function mapConnection(state: HubConnectionState): ConnectionStatus {
+  if (state === HubConnectionState.Connected) return 'connected'
+  if (state === HubConnectionState.Connecting || state === HubConnectionState.Reconnecting) {
+    return 'connecting'
+  }
+  return 'disconnected'
+}
 
 const WINDOW_DAYS = 30
 const WINDOW_MS = WINDOW_DAYS * 24 * 60 * 60 * 1000
 
 export function ServicesPage() {
+  const { connectionState } = useFlareHub('dashboard')
   const { data: services, isFetched: servicesReady } = useServices()
   // Client-side derive per-service 30d history. Same shape as DashboardPage:
   // a dedicated `/api/v1/services/:id/stats` endpoint would scale better,
-  // but at MVP volumes the round-trip cost dominates DB cost.
+  // but at MVP volumes the round-trip cost dominates DB cost. Hub
+  // subscription above keeps `['incidents']` warm on Created / StatusChanged.
   const { data: allIncidents } = useIncidents()
 
   // useState lazy-init captures Date.now() once at mount. Computing it inside
   // a useMemo body would trip react-hooks/purity since the memo can re-run.
+  // Consequence: a tab left open past midnight will keep the same 30-day
+  // boundary — acceptable on a portfolio MVP, fix would be a `setInterval`
+  // refresh on visibility change.
   const [cutoffMs] = useState(() => Date.now() - WINDOW_MS)
 
   const recentByService = useMemo(() => {
@@ -36,9 +51,10 @@ export function ServicesPage() {
   }, [allIncidents, cutoffMs])
 
   const [open, setOpen] = useState<Service | null>(null)
+  const connectionStatus = mapConnection(connectionState)
 
   return (
-    <AppShell>
+    <AppShell connectionStatus={connectionStatus}>
       <div className="space-y-6">
         <header className="flex flex-wrap items-baseline justify-between gap-3">
           <div className="space-y-1">

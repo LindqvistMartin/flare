@@ -51,4 +51,31 @@ describe('createDebouncer', () => {
     expect(fn).toHaveBeenNthCalledWith(1, 'a')
     expect(fn).toHaveBeenNthCalledWith(2, 'b')
   })
+
+  it('flush invokes the pending call immediately and reports true', () => {
+    const fn = vi.fn()
+    const d = createDebouncer(fn, 500)
+    d.call('a')
+    expect(d.flush()).toBe(true)
+    expect(fn).toHaveBeenCalledExactlyOnceWith('a')
+    vi.advanceTimersByTime(1000)
+    expect(fn).toHaveBeenCalledOnce()
+  })
+
+  it('flush returns false when nothing is pending', () => {
+    const fn = vi.fn()
+    const d = createDebouncer(fn, 500)
+    expect(d.flush()).toBe(false)
+    expect(fn).not.toHaveBeenCalled()
+  })
+
+  it('flush uses the most recent args after a burst', () => {
+    const fn = vi.fn()
+    const d = createDebouncer(fn, 500)
+    d.call('a')
+    d.call('b')
+    d.call('c')
+    d.flush()
+    expect(fn).toHaveBeenCalledExactlyOnceWith('c')
+  })
 })
