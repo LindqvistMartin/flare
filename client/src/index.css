@@ -122,3 +122,17 @@
     background-size: 24px 24px;
   }
 }
+
+/* Amber-warning highlight after the postmortem draft regenerates. Fades over
+   1.5s so the change is noticed without being intrusive — a 50ms ring-shimmer
+   would read as a glitch, 5s would read as broken state. */
+@keyframes pm-highlight {
+  0%   { box-shadow: 0 0 0 0 color-mix(in oklch, oklch(0.85 0.18 80) 70%, transparent); }
+  20%  { box-shadow: 0 0 0 3px color-mix(in oklch, oklch(0.85 0.18 80) 60%, transparent); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+.animate-pm-highlight {
+  animation: pm-highlight 1500ms ease-out;
+  border-radius: var(--radius-md);
+}

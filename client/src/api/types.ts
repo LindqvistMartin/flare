@@ -53,6 +53,30 @@ export type ActionItem = {
   createdAt: string
 }
 
+export type PostmortemStatus = 'Draft' | 'Published'
+
+export type Postmortem = {
+  id: string
+  incidentId: string
+  status: PostmortemStatus
+  impact: string
+  timeline: string
+  rootCause: string
+  createdAt: string
+  publishedAt: string | null
+}
+
+// Shape inside Postmortem.timeline (a JSON-serialised array). Mirrors the
+// TimelineEntry record in src/Flare.Core/Services/PostmortemDraftBuilder.cs.
+// PascalCase here because JsonSerializer.Serialize on the anonymous wrapper
+// uses default options, which preserves the C# property casing on the wire.
+export type PostmortemTimelineEntry = {
+  At: string
+  Type: string
+  ActorId: string | null
+  Summary: string
+}
+
 export type DashboardSummary = {
   openIncidentsCount: number
   overdueActionItemsCount: number

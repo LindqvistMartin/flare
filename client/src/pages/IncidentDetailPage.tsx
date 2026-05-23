@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { HubConnectionState } from '@microsoft/signalr'
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, FileText } from 'lucide-react'
 import { toast } from 'sonner'
 import { AppShell, type ConnectionStatus } from '@/components/AppShell'
 import { Card, CardContent } from '@/components/ui/card'
@@ -101,10 +101,18 @@ export function IncidentDetailPage() {
               {serviceQuery.data?.name ?? '…'} · opened {formatTimestampUtc(incident.createdAt)}
             </p>
           </div>
-          <StatusTransitionControl
-            incidentId={incident.id}
-            currentStatus={incident.status}
-          />
+          <div className="flex flex-wrap items-center gap-2">
+            <Button asChild size="sm" variant="ghost" className="font-mono text-[10px] uppercase tracking-wide">
+              <Link to={`/incidents/${incident.id}/postmortem`}>
+                <FileText className="mr-1.5 h-3 w-3" aria-hidden />
+                Postmortem
+              </Link>
+            </Button>
+            <StatusTransitionControl
+              incidentId={incident.id}
+              currentStatus={incident.status}
+            />
+          </div>
         </div>
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]">

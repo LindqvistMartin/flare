@@ -16,6 +16,20 @@ public static class PostmortemsEndpoints
     {
         var group = app.MapGroup("/api/v1/incidents/{id:guid}/postmortem");
 
+        group.MapGet("/", async (
+            Guid id,
+            FlareDbContext db,
+            CancellationToken ct) =>
+        {
+            var pm = await db.Postmortems
+                .AsNoTracking()
+                .FirstOrDefaultAsync(p => p.IncidentId == id, ct);
+
+            return pm is null
+                ? Results.Problem(statusCode: 404, title: "Postmortem not found")
+                : Results.Ok(pm.ToResponse());
+        });
+
         group.MapPost("/generate", async (
             Guid id,
             FlareDbContext db,
@@ -66,6 +80,28 @@ public static class PostmortemsEndpoints
                 // Another regeneration committed against the same Draft after we loaded it.
                 return Results.Problem(statusCode: 409, title: "Postmortem was modified concurrently");
             }
+        });
+
+        group.MapPost("/publish", async (
+            Guid id,
+            FlareDbContext db,
+            CancellationToken ct) =>
+        {
+            var pm = await db.Postmortems
+                .FirstOrDefaultAsync(p => p.IncidentId == id, ct);
+
+            if (pm is null)
+                return Results.Problem(statusCode: 404, title: "Postmortem not found");
+
+            // Idempotent: republishing a published postmortem returns the current
+            // representation. The domain's Publish() method does not guard
+            // against repeat calls; the endpoint enforces the no-op contract.
+            if (pm.Status == PostmortemStatus.Published)
+                return Results.Ok(pm.ToResponse());
+
+            pm.Publish();
+            await db.SaveChangesAsync(ct);
+            return Results.Ok(pm.ToResponse());
         });
 
         return app;
