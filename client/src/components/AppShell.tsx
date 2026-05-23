@@ -3,6 +3,7 @@ import { Sun, Moon, Terminal, Flame } from 'lucide-react'
 import { Link, useLocation } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { useTheme } from '@/contexts/ThemeContext'
+import { useCommandPalette } from '@/contexts/CommandPaletteContext'
 import { cn } from '@/lib/utils'
 
 export type ConnectionStatus = 'connected' | 'connecting' | 'disconnected'
@@ -49,6 +50,7 @@ interface AppShellProps {
 export function AppShell({ children, connectionStatus }: AppShellProps) {
   const { theme, toggleTheme } = useTheme()
   const location = useLocation()
+  const { setOpen: setPaletteOpen } = useCommandPalette()
 
   return (
     <div className="min-h-screen bg-background">
@@ -109,7 +111,7 @@ export function AppShell({ children, connectionStatus }: AppShellProps) {
               size="sm"
               className="h-8 gap-1.5 px-2 font-mono text-[11px] text-muted-foreground hover:text-foreground"
               aria-label="Command palette"
-              disabled
+              onClick={() => setPaletteOpen(true)}
             >
               <Terminal className="h-3.5 w-3.5" />
               <span className="hidden sm:inline tracking-wide">⌘K</span>
