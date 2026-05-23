@@ -7,7 +7,7 @@ import { ServiceDetailDialog } from '@/components/ServiceDetailDialog'
 import { useServices } from '@/api/hooks/useServices'
 import { useIncidents } from '@/api/hooks/useIncidents'
 import { useFlareHub } from '@/hooks/useFlareHub'
-import type { Incident, Service } from '@/api/types'
+import type { Incident } from '@/api/types'
 
 function mapConnection(state: HubConnectionState): ConnectionStatus {
   if (state === HubConnectionState.Connected) return 'connected'
@@ -50,7 +50,16 @@ export function ServicesPage() {
     return map
   }, [allIncidents, cutoffMs])
 
-  const [open, setOpen] = useState<Service | null>(null)
+  // Track the open dialog by id, not by Service snapshot. Storing the entity
+  // would freeze runbookBody at card-click time: after a successful save the
+  // cache updates but our local copy stays stale, leaving the dirty chip
+  // stuck on "Unsaved" until the user reopens the dialog. Deriving from the
+  // current list cache lets the chip flip Unsaved → Saving → Saved as the
+  // mutation lands.
+  const [openServiceId, setOpenServiceId] = useState<string | null>(null)
+  const openService = openServiceId
+    ? services.find(s => s.id === openServiceId) ?? null
+    : null
   const connectionStatus = mapConnection(connectionState)
 
   return (
@@ -100,7 +109,7 @@ export function ServicesPage() {
                 service={svc}
                 incidents={recentByService.get(svc.id) ?? []}
                 windowDays={WINDOW_DAYS}
-                onOpen={setOpen}
+                onOpen={s => setOpenServiceId(s.id)}
               />
             ))}
           </div>
@@ -108,9 +117,9 @@ export function ServicesPage() {
       </div>
 
       <ServiceDetailDialog
-        service={open}
+        service={openService}
         onOpenChange={isOpen => {
-          if (!isOpen) setOpen(null)
+          if (!isOpen) setOpenServiceId(null)
         }}
       />
     </AppShell>
