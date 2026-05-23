@@ -25,9 +25,10 @@ public sealed class StatusPageCache(IMemoryCache cache, IServiceScopeFactory sco
     //                   TrySet / Invalidate on that slug.    distinct slugs ever seen.
     //
     // Lock order across the file: slug lock OUTER, reverse-index bucket lock INNER. Never
-    // reverse. OnEviction (which takes bucket locks) only runs synchronously inside a
-    // cache.Set / cache.Remove that was issued under the slug lock, so the same thread holds
-    // both in order — no cross-thread cycle possible.
+    // reverse. Explicit cleanup in Invalidate / TrySet takes bucket locks while holding the
+    // slug lock — same thread, same order. OnEviction also takes bucket locks but never
+    // takes the slug lock, so its (potentially thread-pool) invocation cannot deadlock with
+    // an in-flight Invalidate / TrySet on the same slug.
     private readonly ConcurrentDictionary<Guid, HashSet<string>> _reverseIndex = new();
     private readonly ConcurrentDictionary<string, long> _versions = new();
     private readonly ConcurrentDictionary<string, Lazy<Task<string?>>> _inflight = new();
@@ -121,10 +122,20 @@ public sealed class StatusPageCache(IMemoryCache cache, IServiceScopeFactory sco
         {
             // Bump version FIRST so any concurrent reader that captured an older version
             // (and is now about to TrySet) detects the move once it acquires this lock.
-            // cache.Remove fires OnEviction synchronously on this thread; that handler is
-            // the single source of truth for _ownedServices + reverse-index cleanup, so
-            // there is no redundant Invalidate-side cleanup to do here.
+            //
+            // Prune _ownedServices and the reverse-index BEFORE cache.Remove rather than
+            // relying on OnEviction. IMemoryCache documents PostEvictionCallback as "may
+            // execute on a different thread" — under Linux thread-pool scheduling the
+            // callback can lag the Remove call, leaving stale slug bindings that a
+            // racing InvalidateForServiceAsync then treats as live. Doing the cleanup
+            // here serialises it under the slug lock with no callback timing dependency.
+            // OnEviction stays as an idempotent fallback for the TTL-expiration path
+            // (no caller code on that thread to clean up explicitly).
             BumpVersion(slug);
+            if (_ownedServices.TryRemove(slug, out var owned))
+            {
+                RemoveFromBuckets(slug, owned);
+            }
             cache.Remove(KeyPrefix + slug);
         }
     }
@@ -173,6 +184,16 @@ public sealed class StatusPageCache(IMemoryCache cache, IServiceScopeFactory sco
         {
             if (GetVersion(slug) > expectedVersion) return false;
 
+            // Set-over-Set replacement: prune the old entry's reverse-index bindings
+            // synchronously rather than waiting for the Replaced-eviction callback,
+            // which IMemoryCache may dispatch on a thread-pool thread. Without this,
+            // a follow-up InvalidateForServiceAsync targeting one of the OLD service
+            // ids can read stale bindings and invalidate the just-written entry.
+            if (_ownedServices.TryGetValue(slug, out var oldOwned))
+            {
+                RemoveFromBuckets(slug, oldOwned);
+            }
+
             // Take a defensive snapshot of the serviceIds we are about to register so the
             // eviction callback can prune exactly the buckets this entry owns (O(serviceIds)
             // instead of O(reverseIndex)) and survives Set→Set replacement of the same key.
@@ -205,10 +226,18 @@ public sealed class StatusPageCache(IMemoryCache cache, IServiceScopeFactory sco
     private void OnEviction(object key, object? value, EvictionReason reason, object? state)
     {
         if (key is not string k || !k.StartsWith(KeyPrefix, StringComparison.Ordinal)) return;
-        // Every entry is registered with a Guid[] snapshot in TrySet, so state is always non-
-        // null for our keys. Walk only the buckets this entry owned (O(serviceIds)) rather
-        // than every key in the reverse index — prevents the bucket-count amplification an
-        // attacker rotating ServiceIds could otherwise turn into per-eviction sweeps.
+        // Idempotent fallback for the TTL-expiration path: explicit Invalidate /
+        // Set-over-Set already prune _ownedServices and the reverse-index under the
+        // slug lock. When entries expire after their 30s window with no caller code
+        // on the thread, this is the only cleanup hook. TryRemove returning false and
+        // RemoveFromBuckets on an already-cleared slug are both safe no-ops, so
+        // double-cleanup from the explicit path is harmless.
+        //
+        // Every entry is registered with a Guid[] snapshot in TrySet, so state is
+        // always non-null for our keys. Walk only the buckets this entry owned
+        // (O(serviceIds)) rather than every key in the reverse index — prevents the
+        // bucket-count amplification an attacker rotating ServiceIds could otherwise
+        // turn into per-eviction sweeps.
         var owned = (Guid[])state!;
         var slug = k[KeyPrefix.Length..];
         _ownedServices.TryRemove(slug, out _);
