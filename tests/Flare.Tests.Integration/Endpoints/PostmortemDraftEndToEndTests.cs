@@ -41,12 +41,14 @@ public sealed class PostmortemDraftEndToEndTests(ApiFactory factory) : IAsyncLif
             new AddEventRequest("CommentAdded", """{"comment":"DB connections saturating"}"""));
         commentResp.StatusCode.Should().Be(HttpStatusCode.Created);
 
-        // 3) SeverityChanged. Payload uses PascalCase To to match the convention
-        // the Roles/Transition producers use, and SummarizeEvent reads
-        // case-insensitively.
+        // 3) SeverityChanged. Posted via the generic /events endpoint, which
+        // whitelists SeverityChanged (IncidentsEndpoints.cs AllowedExternalEventTypes).
+        // Note: this writes a raw event without touching Incident.Severity — the
+        // assertion below only verifies the event-type appears in the timeline,
+        // not that the aggregate's severity transitioned.
         var sevResp = await client.PostAsJsonAsync(
             $"/api/v1/incidents/{incident.Id}/events",
-            new AddEventRequest("SeverityChanged", """{"To":"Sev1"}"""));
+            new AddEventRequest("SeverityChanged", """{"to":"Sev1"}"""));
         sevResp.StatusCode.Should().Be(HttpStatusCode.Created);
 
         // 4) RoleAssigned — Commander.

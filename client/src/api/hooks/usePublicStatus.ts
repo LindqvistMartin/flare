@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { isAxiosError } from 'axios'
 import publicApi from '@/api/publicClient'
 import type {
   PublicActiveIncident,
@@ -10,6 +11,10 @@ import type {
 import type { IncidentSeverity, IncidentStatus } from '@/api/types'
 
 const VALID_OVERALL = new Set<PublicOverallStatus>(['operational', 'degraded', 'major', 'unknown'])
+const VALID_SEVERITY = new Set<IncidentSeverity>(['Sev1', 'Sev2', 'Sev3', 'Sev4'])
+const VALID_STATUS = new Set<IncidentStatus>([
+  'Triggered', 'Investigating', 'Identified', 'Monitoring', 'Resolved', 'Closed',
+])
 
 function toOverall(status: string): PublicOverallStatus {
   return VALID_OVERALL.has(status as PublicOverallStatus)
@@ -17,11 +22,24 @@ function toOverall(status: string): PublicOverallStatus {
     : 'unknown'
 }
 
+// Wire severity/status are operator/domain strings. A backend enum addition
+// (e.g. Sev5) would otherwise propagate as a typed-but-impossible value into
+// SeverityBadge / StatusChip and miss the cva variant lookup. Fall back to the
+// lowest-impact known value — Sev4 for severity, Investigating for status —
+// so the row still renders rather than crashing the page.
+function toSeverity(raw: string): IncidentSeverity {
+  return VALID_SEVERITY.has(raw as IncidentSeverity) ? (raw as IncidentSeverity) : 'Sev4'
+}
+
+function toStatus(raw: string): IncidentStatus {
+  return VALID_STATUS.has(raw as IncidentStatus) ? (raw as IncidentStatus) : 'Investigating'
+}
+
 function mapIncident(raw: PublicStatusWire['Services'][number]['ActiveIncidents'][number]): PublicActiveIncident {
   return {
     title: raw.Title,
-    severity: raw.Severity as IncidentSeverity,
-    status: raw.Status as IncidentStatus,
+    severity: toSeverity(raw.Severity),
+    status: toStatus(raw.Status),
     since: raw.Since,
   }
 }
@@ -54,14 +72,14 @@ export function usePublicStatus(slug: string | undefined) {
       return mapPage(data)
     },
     enabled: typeof slug === 'string' && slug.length > 0,
-    // Backend caches the response for 30s; matching staleTime avoids needless refetches
-    // when the route re-mounts (e.g. user navigates away and back).
+    // Backend caches the response for 30s (StatusPageCache TTL in
+    // src/Flare.Infrastructure/Caching/StatusPageCache.cs). Matching staleTime
+    // avoids needless refetches when the route re-mounts.
     staleTime: 30_000,
-    retry: (count, error) => {
-      // Don't retry 404s — slug doesn't exist, retrying is pointless.
-      const status = (error as { response?: { status?: number } }).response?.status
-      if (status === 404) return false
-      return count < 2
+    retry: (failureCount, error) => {
+      // 404 means the slug doesn't exist — retrying never recovers.
+      if (isAxiosError(error) && error.response?.status === 404) return false
+      return failureCount < 2
     },
   })
 }

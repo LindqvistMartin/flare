@@ -32,16 +32,34 @@ export function StatusPagePage() {
   const { slug } = useParams<{ slug: string }>()
   const query = usePublicStatus(slug)
 
+  // React Router guarantees the param for /p/:slug, but a manual /#/p/ visit
+  // lands here with an undefined slug — hook stays disabled (isPending=true,
+  // no data, no error) and the page would render an infinite skeleton without
+  // this guard.
+  if (!slug) {
+    return (
+      <div className="min-h-screen bg-background">
+        <div className="mx-auto max-w-2xl px-6 py-16 sm:py-24">
+          <NotFoundShell slug="" />
+          <Footer />
+        </div>
+      </div>
+    )
+  }
+
   const notFound = isAxiosError(query.error) && query.error.response?.status === 404
-  const networkError = query.error && !notFound
+  // A successful previous load that is now refetching with an error keeps
+  // query.data populated — keep showing the last good snapshot rather than
+  // flashing an error shell over a working page.
+  const networkError = query.error && !notFound && !query.data
 
   return (
     <div className="min-h-screen bg-background">
       <div className="mx-auto max-w-2xl px-6 py-16 sm:py-24">
-        {query.isPending && <LoadingShell slug={slug ?? ''} />}
-        {notFound && <NotFoundShell slug={slug ?? ''} />}
-        {networkError && <NetworkErrorShell slug={slug ?? ''} />}
         {query.data && <StatusShell page={query.data} />}
+        {!query.data && notFound && <NotFoundShell slug={slug} />}
+        {!query.data && networkError && <NetworkErrorShell slug={slug} />}
+        {!query.data && !query.error && query.isPending && <LoadingShell slug={slug} />}
         <Footer generatedAt={query.data?.generatedAt} />
       </div>
     </div>
