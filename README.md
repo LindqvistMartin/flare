@@ -6,7 +6,7 @@
 [![.NET](https://img.shields.io/badge/.NET-10-purple.svg)](https://dotnet.microsoft.com)
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](https://react.dev)
 [![CI](https://github.com/LindqvistMartin/flare/actions/workflows/ci.yml/badge.svg)](https://github.com/LindqvistMartin/flare/actions)
-[![Tests](https://img.shields.io/badge/tests-250%20passing-brightgreen.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-261%20passing-brightgreen.svg)](#)
 
 ## Architecture
 
@@ -159,5 +159,19 @@ The dev server CORS is already wired into `Program.cs`.
   422), Commander / Communicator / Responder assignment, comment composer with
   zod validation, and a Markdown runbook sidebar pulled from the linked service.
   The page subscribes to the `incident:{id}` SignalR group so transitions and
-  events from other operators land without polling. Routes for services,
-  action items, and the public status page still ship as placeholders.
+  events from other operators land without polling.
+- **Postmortem viewer** — Generate draft from event stream, Draft / Published
+  status chip, attached action items panel with inline create. Impact and Root
+  Cause render alongside the materialised timeline so a published postmortem
+  reads end-to-end on a single screen.
+- **Action items tracker** — `/action-items` shows All / Open / In Progress /
+  Done / Overdue tabs with inline status toggle. Due-date chips flip to alert
+  tone when overdue.
+- **Services + runbook editor** — service catalog with per-service incident
+  history; runbook is a Markdown editor with debounced save.
+- **Command palette** — global Ctrl/Cmd + K opens a `cmdk`-powered palette with
+  navigation actions and a search index over recent incidents.
+- **Public status page frontend** — `/p/:slug` renders the customer-facing
+  layout (overall status, per-service rows, active incidents) against the
+  cached `/public/status/{slug}` endpoint. Separate axios instance without
+  credentials keeps the route auth-free even after admin auth lands.
