@@ -8,6 +8,37 @@
 [![CI](https://github.com/LindqvistMartin/flare/actions/workflows/ci.yml/badge.svg)](https://github.com/LindqvistMartin/flare/actions)
 [![Tests](https://img.shields.io/badge/tests-261%20passing-brightgreen.svg)](#)
 
+## Why
+
+FireHydrant lists at $44/user/month. Rootly is $20+/user/month with opaque
+Scale-tier pricing. Incident.io is $19-50/user/month with status pages and
+on-call gated to higher tiers. PagerDuty starts at $21/user/month.
+**Opsgenie, the historical affordable option, shuts down in April 2027 —
+~800K users are looking for a replacement right now.**
+
+There is no serious open-source alternative. Dispatch (Netflix) needs Keycloak,
+PagerDuty, and Slack just to boot. Nothing else clears 2K stars. The space is
+100% SaaS-owned.
+
+Flare fills the gap: full incident lifecycle — webhook ingest, append-only
+timeline, auto-drafted postmortems from the event stream, MTTR / MTTA
+materialised views, Slack and Teams notifications via outbox, public status
+pages — with one `docker compose up`. Self-hosted, single deployable monolith,
+.NET 10 on the back, React 19 on the front, Postgres for everything.
+
+## Screenshots
+
+![Dashboard with five active incidents, MTTR 30-day trend, and overdue action items](docs/screenshots/dashboard.png)
+![Incident detail with assigned roles, timeline feed, and per-service runbook sidebar](docs/screenshots/incident-detail.png)
+![Postmortem auto-drafted from the incident event stream with action items](docs/screenshots/postmortem.png)
+![Action items tracker with All / Open / In progress / Done / Overdue filters](docs/screenshots/action-items.png)
+![Service catalogue with 30-day incident counts and runbook-ready indicator](docs/screenshots/services.png)
+![Command palette: search, navigation, dark-mode toggle, recent incidents](docs/screenshots/cmd-k.png)
+![Public status page at /p/:slug — overall status, per-service health, active incidents](docs/screenshots/public-status.png)
+
+> Screenshots are produced locally by `scripts/seed-demo.ps1`, which seeds 30
+> days of incident history and then runs a Playwright capture spec.
+
 ## Architecture
 
 Single deployable monolith. ASP.NET Core 10 Minimal API on the front edge, EF Core
