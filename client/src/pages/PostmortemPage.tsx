@@ -165,7 +165,11 @@ export function PostmortemPage() {
             </Section>
 
             <Section title="Contributing factors">
-              <ContributingFactorsPlaceholder />
+              {postmortem.rootCause && postmortem.rootCause.trim().length > 0 ? (
+                <ContributingFactorsBody text={postmortem.rootCause} />
+              ) : (
+                <ContributingFactorsPlaceholder />
+              )}
             </Section>
 
             <Section title="Action items">
@@ -289,6 +293,16 @@ function ContributingFactorsPlaceholder() {
       Contributing factors are not auto-derived from the timeline. The hand-editable form
       lands when the backend gets a postmortem PATCH endpoint.
     </p>
+  )
+}
+
+function ContributingFactorsBody({ text }: { text: string }) {
+  // Mirror the Impact section's mono-pre style so the two prose blocks read as
+  // a pair. RootCause is plain text from the domain — no markdown rendering.
+  return (
+    <pre className="whitespace-pre-wrap break-words font-mono text-[12px] leading-relaxed text-foreground">
+      {text}
+    </pre>
   )
 }
 
