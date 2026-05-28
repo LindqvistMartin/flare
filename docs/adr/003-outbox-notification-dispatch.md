@@ -28,10 +28,11 @@ Status-changing endpoints write an `OutboxMessage` row in the same EF Core
 `SaveChangesAsync` call in an implicit transaction, so all `db.*.Add` calls
 between two saves either land together or not at all. **Convention:** producer
 sites that need a second `SaveChangesAsync` (e.g. dedup-check pattern) must
-wrap their adds in an explicit `BeginTransactionAsync` block. Five producers
+wrap their adds in an explicit `BeginTransactionAsync` block. Six producers
 follow this convention today: `IngestionWorker`, manual
 `POST /api/v1/incidents`, `POST /api/v1/incidents/{id}/transition`,
-`POST /api/v1/incidents/{id}/events`, and the daily
+`POST /api/v1/incidents/{id}/events`,
+`POST /api/v1/incidents/{id}/roles`, and the daily
 `ActionItemReminderService` background tick.
 
 A `NotificationDispatcher` `BackgroundService` polls `"OutboxMessages"` every
@@ -188,13 +189,6 @@ content).
 
 ## Roadmap (deferred, not consequences of this decision)
 
-- **No broadcast for `RoleAssigned` yet.** `POST /api/v1/incidents/{id}/roles`
-  writes an `IncidentEvent` but no outbox row, so an `incident:{id}` subscriber
-  only learns about role changes on the next refetch. The frontend timeline
-  that consumes the group is now shipped, so closing this gap (one extra
-  `OutboxMessage` write inside the same `SaveChangesAsync` as the
-  `IncidentEvent`, dispatcher already routes by `Type`) is a small, isolated
-  follow-up rather than a coupled change.
 - **No hub auth.** `FlareHub.JoinIncident(Guid)` accepts any caller. Acceptable
   while authentication is deferred (see project concept's scope guards);
   revisit when auth lands.

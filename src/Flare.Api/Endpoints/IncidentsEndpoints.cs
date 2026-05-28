@@ -127,7 +127,12 @@ public static class IncidentsEndpoints
 
             var evt = new IncidentEvent(incident.Id, IncidentEventType.RoleAssigned,
                 JsonSerializer.Serialize(new { Role = req.Role, req.UserId }), actorId: null);
+            var outbox = new OutboxMessage(
+                OutboxMessageTypes.IncidentEventAdded,
+                JsonSerializer.Serialize(new { IncidentId = id, EventId = evt.Id, Type = IncidentEventType.RoleAssigned.ToString() }));
+
             db.IncidentEvents.Add(evt);
+            db.OutboxMessages.Add(outbox);
 
             await db.SaveChangesAsync(ct);
             return Results.Ok(incident.ToResponse());
