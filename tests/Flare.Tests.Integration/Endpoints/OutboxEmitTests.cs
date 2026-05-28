@@ -76,6 +76,37 @@ public sealed class OutboxEmitTests(ApiFactory factory) : IAsyncLifetime
         payload.GetProperty("Type").GetString().Should().Be("CommentAdded");
     }
 
+    [Fact]
+    public async Task PostIncidentRole_WritesIncidentEventAddedOutboxRow()
+    {
+        var serviceId = await SeedAndReturnServiceIdAsync();
+        var client = factory.CreateClient();
+
+        var createResponse = await client.PostAsJsonAsync("/api/v1/incidents",
+            new CreateIncidentRequest("Payment latency spike", "Sev2", serviceId));
+        var incident = (await createResponse.Content.ReadFromJsonAsync<IncidentResponse>())!;
+
+        var commanderId = Guid.NewGuid();
+        var roleResponse = await client.PostAsJsonAsync(
+            $"/api/v1/incidents/{incident.Id}/roles",
+            new AssignRoleRequest("Commander", commanderId));
+
+        roleResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<FlareDbContext>();
+        var outbox = await db.OutboxMessages
+            .AsNoTracking()
+            .Where(o => o.Type == OutboxMessageTypes.IncidentEventAdded)
+            .ToListAsync();
+
+        outbox.Should().HaveCount(1);
+        var payload = JsonSerializer.Deserialize<JsonElement>(outbox[0].Payload);
+        payload.GetProperty("IncidentId").GetGuid().Should().Be(incident.Id);
+        payload.GetProperty("EventId").GetGuid().Should().NotBeEmpty();
+        payload.GetProperty("Type").GetString().Should().Be("RoleAssigned");
+    }
+
     private async Task<Guid> SeedAndReturnServiceIdAsync()
     {
         using var scope = factory.Services.CreateScope();
