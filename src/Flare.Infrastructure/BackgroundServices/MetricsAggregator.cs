@@ -29,7 +29,10 @@ public sealed class MetricsAggregator(
         }
     }
 
-    private async Task RefreshAsync(CancellationToken ct)
+    // Refresh both matviews. Exposed as internal so integration tests can drive a
+    // deterministic refresh instead of racing the 5-minute poll loop — same pattern
+    // as NotificationDispatcher.ProcessOnceAsync.
+    internal async Task RefreshAsync(CancellationToken ct)
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<FlareDbContext>();

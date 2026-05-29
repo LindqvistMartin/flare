@@ -26,6 +26,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
     private readonly Dictionary<string, string?> _configOverrides = new();
     private bool _registerDispatcherAsSingleton;
     private bool _registerReminderAsSingleton;
+    private bool _registerMetricsAggregatorAsSingleton;
     private HttpMessageHandler? _slackHandler;
     private HttpMessageHandler? _teamsHandler;
     private bool _disposed;
@@ -79,6 +80,14 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
         return this;
     }
 
+    public ApiFactory WithMetricsAggregatorForManualTick()
+    {
+        // Same pattern as WithDispatcherForManualTick — used by matview refresh tests
+        // that need to call internal RefreshAsync deterministically without the 5-min loop.
+        _registerMetricsAggregatorAsSingleton = true;
+        return this;
+    }
+
     public ApiFactory WithSlackHandler(HttpMessageHandler handler)
     {
         _slackHandler = handler;
@@ -126,6 +135,10 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
             if (_registerReminderAsSingleton)
             {
                 services.AddSingleton<ActionItemReminderService>();
+            }
+            if (_registerMetricsAggregatorAsSingleton)
+            {
+                services.AddSingleton<MetricsAggregator>();
             }
 
             // Named-client builder actions accumulate across registrations. Clearing the

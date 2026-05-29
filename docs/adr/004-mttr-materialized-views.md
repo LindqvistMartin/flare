@@ -120,9 +120,15 @@ under all three steps — the API shape does not change.
   CONCURRENTLY` for both views after each `TRUNCATE` so per-test state is
   consistent — proves the refresh path stays healthy as the schema and the
   surrounding data graph evolve.
-- Matview math was smoke-tested via `psql` inside the Postgres container
-  when the migration first landed: synthetic incidents with known resolve
-  and acknowledge gaps, then `SELECT * FROM mttr_by_service_30d` /
-  `mtta_by_service_30d` to confirm the aggregate matched. Dedicated
-  `MetricsAggregator` and `/api/v1/metrics` integration tests are on the
-  test-coverage backlog rather than shipped today.
+- Matview math is pinned by `MetricsAggregateTests`: seeded incidents with
+  known resolve and acknowledge gaps, REFRESH via raw SQL, then
+  `GET /api/v1/metrics/mttr`, `/mtta`, and `/dashboard` assert the expected
+  aggregates plus the open / overdue dashboard signals. The zero-row case
+  (a service with no resolved incidents in the window) is covered as a
+  separate fact so LEFT JOIN + COALESCE drift surfaces immediately.
+- `MetricsAggregator` itself is exercised by `MetricsAggregatorTests`,
+  which drives the internal `RefreshAsync` directly via the
+  `WithMetricsAggregatorForManualTick` fixture knob — same `internal`
+  exposure pattern as `NotificationDispatcher.ProcessOnceAsync`. The
+  5-minute poll loop and graceful-shutdown handling are deliberately
+  out of scope — those are stock `BackgroundService` behaviour.
