@@ -119,6 +119,13 @@ public sealed class MetricsAggregateTests(ApiFactory factory) : IAsyncLifetime
         int[] createdDaysAgo,
         long[]? ackDurationsMs = null)
     {
+        // Parallel-array contract — opaque IndexOutOfRangeException from later .SetValue calls
+        // is much harder to diagnose than a precondition failure right at the call site.
+        if (createdDaysAgo.Length != durationsMs.Length)
+            throw new ArgumentException("createdDaysAgo length must match durationsMs.", nameof(createdDaysAgo));
+        if (ackDurationsMs is not null && ackDurationsMs.Length != durationsMs.Length)
+            throw new ArgumentException("ackDurationsMs length must match durationsMs.", nameof(ackDurationsMs));
+
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<FlareDbContext>();
 
@@ -161,6 +168,9 @@ public sealed class MetricsAggregateTests(ApiFactory factory) : IAsyncLifetime
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<FlareDbContext>();
 
+        // ResolvedAt left null on purpose — the MTTR matview filters on
+        // ResolvedAt IS NOT NULL, so these stay out of the aggregate and only
+        // light up the dashboard's open-incidents count.
         var statusProp = typeof(Incident).GetProperty(nameof(Incident.Status))!;
         for (var i = 0; i < statuses.Length; i++)
         {

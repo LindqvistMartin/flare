@@ -13,7 +13,9 @@ namespace Flare.Tests.Integration.BackgroundServices;
 // REFRESH path produces the matview rows the /api/v1/metrics/* endpoints rely on, without
 // waiting for the 5-minute poll loop. Mirrors the SlackDispatchTests pattern: own ApiFactory
 // per test, ConfigureWebHost flag swaps the hosted-service registration for a singleton, and
-// the test resolves and ticks directly.
+// the test resolves and ticks directly. The injected ApiFactory is intentionally discarded —
+// each test owns its own factory below; joining the "Api" collection only serializes container
+// starts against shared-fixture tests so the Docker daemon does not race itself.
 [Collection("Api")]
 public sealed class MetricsAggregatorTests(ApiFactory _)
 {
