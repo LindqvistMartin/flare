@@ -31,8 +31,9 @@ public sealed class MetricsAggregator(
 
     // Refresh both matviews. Exposed as internal so integration tests can drive a
     // deterministic refresh instead of racing the 5-minute poll loop — same pattern
-    // as NotificationDispatcher.ProcessOnceAsync. Idempotent: back-to-back calls
-    // re-snapshot to the same state, safe to invoke from any thread or test.
+    // as NotificationDispatcher.ProcessOnceAsync. Serialized back-to-back calls
+    // re-snapshot to the same state; REFRESH CONCURRENTLY takes EXCLUSIVE on the
+    // matview so overlapping refreshes block — not safe to fan out in parallel.
     internal async Task RefreshAsync(CancellationToken ct)
     {
         await using var scope = scopeFactory.CreateAsyncScope();
