@@ -4,6 +4,7 @@ using Flare.Infrastructure.Hubs;
 using Flare.Core.Services;
 using Flare.Infrastructure;
 using Flare.Infrastructure.Persistence;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
@@ -65,11 +66,52 @@ app.UseCors();
 app.UseMiddleware<IdempotencyMiddleware>();
 
 app.MapGet("/", () => "Flare API");
+// Liveness: process is up. Deliberately dependency-free so an orchestrator never restarts a
+// healthy process during a transient Postgres blip — that is the readiness probe's job.
 app.MapGet("/healthz", () => Results.Ok(new { status = "ok" }));
-app.MapGet("/healthz/ready", async (FlareDbContext db, CancellationToken ct) =>
+
+// Outbox lag past this many seconds is a degraded signal, not a 503: the dispatcher is behind
+// (Slack/Teams outage or a crash loop) but the API can still serve, so the instance must stay in
+// the load balancer. 60s is ~120 dispatcher poll intervals — well past any transient burst.
+const int OutboxLagDegradedThresholdSeconds = 60;
+
+app.MapGet("/healthz/ready", async (FlareDbContext db, IHubContext<FlareHub> hub, CancellationToken ct) =>
 {
-    var ok = await db.Database.CanConnectAsync(ct);
-    return ok ? Results.Ok(new { status = "ready" }) : Results.StatusCode(503);
+    // Readiness gates on the dependencies this instance needs to serve a request. Postgres is the
+    // only hard gate — without it every write path fails, so a down database is a 503 that pulls
+    // the instance out of rotation.
+    if (!await db.Database.CanConnectAsync(ct))
+        return Results.Json(
+            new { status = "unready", database = "down" },
+            statusCode: StatusCodes.Status503ServiceUnavailable);
+
+    // Oldest unprocessed outbox row = how far behind the NotificationDispatcher is. A wedged
+    // dispatcher surfaces here long before the table grows unbounded. Reported as degraded (still
+    // 200) rather than a 503 so monitoring sees the backlog without the load balancer evicting an
+    // instance that is otherwise serving fine.
+    var oldestUnprocessed = await db.OutboxMessages
+        .Where(m => m.ProcessedAt == null)
+        .OrderBy(m => m.CreatedAt)
+        .Select(m => (DateTime?)m.CreatedAt)
+        .FirstOrDefaultAsync(ct);
+    var outboxLagSeconds = oldestUnprocessed is { } oldest
+        ? (long)Math.Max(0, (DateTime.UtcNow - oldest).TotalSeconds)
+        : 0;
+    var outboxDegraded = outboxLagSeconds > OutboxLagDegradedThresholdSeconds;
+
+    // IHubContext<FlareHub> resolving from DI proves the SignalR pipeline is registered and the
+    // server can originate broadcasts; touching the client proxy exercises that path. This reports
+    // that the realtime plane is wired — it deliberately does not count connected clients, which is
+    // a client-side concern and must never gate an otherwise-serving instance out of rotation.
+    var realtimeReady = hub.Clients.All is not null;
+
+    return Results.Ok(new
+    {
+        status = outboxDegraded ? "degraded" : "ready",
+        database = "up",
+        realtime = realtimeReady ? "up" : "down",
+        outbox = new { unprocessedLagSeconds = outboxLagSeconds, degraded = outboxDegraded },
+    });
 });
 
 app.MapIncidentEndpoints();

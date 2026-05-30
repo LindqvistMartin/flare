@@ -59,6 +59,8 @@ public sealed class NotificationDispatcher(
         await using (var batchScope = scopeFactory.CreateAsyncScope())
         {
             var batchDb = batchScope.ServiceProvider.GetRequiredService<FlareDbContext>();
+            // Claim uses the host token: a cancel before commit rolls the transaction back and
+            // the rows reappear unprocessed on the next start — nothing lost.
             batch = await CommitBatchAsync(batchDb, ct);
         }
 
@@ -69,8 +71,14 @@ public sealed class NotificationDispatcher(
         // Concurrent broadcast with a semaphore cap. Each task creates its own DbContext
         // scope because DbContext is not thread-safe — two concurrent BroadcastAsync calls
         // sharing one context would throw "A second operation was started on this context".
+        //
+        // Post-commit work runs under CancellationToken.None, not the host token. These rows are
+        // already marked processed and will NOT be retried on restart, so cancelling mid-batch on
+        // a graceful shutdown would lose the notifications permanently. Completing the in-flight
+        // broadcast is the correct trade; each send is still bounded by the per-channel HttpClient
+        // 10s timeout, so a wedged webhook cannot stall shutdown indefinitely.
         using var concurrency = new SemaphoreSlim(BroadcastConcurrency);
-        var tasks = batch.Select(msg => BroadcastWithScopeAsync(msg, concurrency, ct));
+        var tasks = batch.Select(msg => BroadcastWithScopeAsync(msg, concurrency, CancellationToken.None));
         await Task.WhenAll(tasks);
     }
 
