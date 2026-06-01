@@ -3,6 +3,7 @@ using Flare.Api.Middleware;
 using Flare.Infrastructure.Hubs;
 using Flare.Core.Services;
 using Flare.Infrastructure;
+using Flare.Infrastructure.Health;
 using Flare.Infrastructure.Persistence;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
@@ -77,41 +78,49 @@ const int OutboxLagDegradedThresholdSeconds = 60;
 
 app.MapGet("/healthz/ready", async (FlareDbContext db, IHubContext<FlareHub> hub, CancellationToken ct) =>
 {
-    // Readiness gates on the dependencies this instance needs to serve a request. Postgres is the
-    // only hard gate — without it every write path fails, so a down database is a 503 that pulls
-    // the instance out of rotation.
-    if (!await db.Database.CanConnectAsync(ct))
+    // Thin adapter over ReadinessReport.Evaluate: run the probes, hand the raw observations to the
+    // pure policy, then map the status to HTTP. The decision lives in the evaluator so every
+    // branch — including the database-down 503 — is unit-testable without a database.
+    var databaseReachable = await db.Database.CanConnectAsync(ct);
+
+    TimeSpan? oldestUnprocessedAge = null;
+    if (databaseReachable)
+    {
+        // Oldest unprocessed outbox row = how far behind the NotificationDispatcher is; a wedged
+        // dispatcher surfaces here long before the table grows unbounded. Age is measured against
+        // this instance's clock — fine for the single-instance deploy; a multi-instance fleet would
+        // compute it DB-side.
+        var oldest = await db.OutboxMessages
+            .Where(m => m.ProcessedAt == null)
+            .OrderBy(m => m.CreatedAt)
+            .Select(m => (DateTime?)m.CreatedAt)
+            .FirstOrDefaultAsync(ct);
+        if (oldest is { } o)
+            oldestUnprocessedAge = DateTime.UtcNow - o;
+    }
+
+    var report = ReadinessReport.Evaluate(
+        databaseReachable,
+        oldestUnprocessedAge,
+        TimeSpan.FromSeconds(OutboxLagDegradedThresholdSeconds));
+
+    if (report.Status == ReadinessStatus.Unready)
         return Results.Json(
             new { status = "unready", database = "down" },
             statusCode: StatusCodes.Status503ServiceUnavailable);
 
-    // Oldest unprocessed outbox row = how far behind the NotificationDispatcher is. A wedged
-    // dispatcher surfaces here long before the table grows unbounded. Reported as degraded (still
-    // 200) rather than a 503 so monitoring sees the backlog without the load balancer evicting an
-    // instance that is otherwise serving fine. Lag is measured against this instance's clock —
-    // fine for the single-instance deploy; a multi-instance fleet would compute it DB-side.
-    var oldestUnprocessed = await db.OutboxMessages
-        .Where(m => m.ProcessedAt == null)
-        .OrderBy(m => m.CreatedAt)
-        .Select(m => (DateTime?)m.CreatedAt)
-        .FirstOrDefaultAsync(ct);
-    var outboxLagSeconds = oldestUnprocessed is { } oldest
-        ? (long)Math.Max(0, (DateTime.UtcNow - oldest).TotalSeconds)
-        : 0;
-    var outboxDegraded = outboxLagSeconds > OutboxLagDegradedThresholdSeconds;
-
-    // Reaching this handler is itself the realtime signal: if SignalR were not registered, the
-    // IHubContext<FlareHub> parameter would fail to resolve and the request would 500 before here.
-    // So we report the realtime plane as wired — deliberately not connected-client count, which is
-    // a client-side concern that must never gate an otherwise-serving instance out of rotation.
+    // Reaching this point means IHubContext<FlareHub> resolved from DI — if SignalR were not
+    // registered the parameter would fail to bind and the request would 500 before here. So we
+    // report the realtime plane as wired, deliberately not connected-client count, which is a
+    // client-side concern that must never gate an otherwise-serving instance out of rotation.
     _ = hub;
 
     return Results.Ok(new
     {
-        status = outboxDegraded ? "degraded" : "ready",
+        status = report.Status == ReadinessStatus.Degraded ? "degraded" : "ready",
         database = "up",
         realtime = "up",
-        outbox = new { unprocessedLagSeconds = outboxLagSeconds, degraded = outboxDegraded },
+        outbox = new { unprocessedLagSeconds = report.OutboxLagSeconds, degraded = report.OutboxDegraded },
     });
 });
 
