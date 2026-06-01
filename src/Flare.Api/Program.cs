@@ -88,7 +88,8 @@ app.MapGet("/healthz/ready", async (FlareDbContext db, IHubContext<FlareHub> hub
     // Oldest unprocessed outbox row = how far behind the NotificationDispatcher is. A wedged
     // dispatcher surfaces here long before the table grows unbounded. Reported as degraded (still
     // 200) rather than a 503 so monitoring sees the backlog without the load balancer evicting an
-    // instance that is otherwise serving fine.
+    // instance that is otherwise serving fine. Lag is measured against this instance's clock —
+    // fine for the single-instance deploy; a multi-instance fleet would compute it DB-side.
     var oldestUnprocessed = await db.OutboxMessages
         .Where(m => m.ProcessedAt == null)
         .OrderBy(m => m.CreatedAt)
@@ -99,17 +100,17 @@ app.MapGet("/healthz/ready", async (FlareDbContext db, IHubContext<FlareHub> hub
         : 0;
     var outboxDegraded = outboxLagSeconds > OutboxLagDegradedThresholdSeconds;
 
-    // IHubContext<FlareHub> resolving from DI proves the SignalR pipeline is registered and the
-    // server can originate broadcasts; touching the client proxy exercises that path. This reports
-    // that the realtime plane is wired — it deliberately does not count connected clients, which is
-    // a client-side concern and must never gate an otherwise-serving instance out of rotation.
-    var realtimeReady = hub.Clients.All is not null;
+    // Reaching this handler is itself the realtime signal: if SignalR were not registered, the
+    // IHubContext<FlareHub> parameter would fail to resolve and the request would 500 before here.
+    // So we report the realtime plane as wired — deliberately not connected-client count, which is
+    // a client-side concern that must never gate an otherwise-serving instance out of rotation.
+    _ = hub;
 
     return Results.Ok(new
     {
         status = outboxDegraded ? "degraded" : "ready",
         database = "up",
-        realtime = realtimeReady ? "up" : "down",
+        realtime = "up",
         outbox = new { unprocessedLagSeconds = outboxLagSeconds, degraded = outboxDegraded },
     });
 });

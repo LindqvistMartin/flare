@@ -23,7 +23,11 @@ public sealed class IngestionWorker(
     private readonly IReadOnlyDictionary<string, IAlertIngestionAdapter> _adapters =
         adapters.ToDictionary(a => a.Source, StringComparer.OrdinalIgnoreCase);
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    protected override Task ExecuteAsync(CancellationToken stoppingToken) => RunAsync(stoppingToken);
+
+    // The run loop. Exposed as internal so the shutdown seam — cancellation throwing out of the
+    // channel read, then the drain — is testable without racing the host lifecycle.
+    internal async Task RunAsync(CancellationToken stoppingToken)
     {
         try
         {
@@ -32,11 +36,11 @@ public sealed class IngestionWorker(
         }
         catch (OperationCanceledException)
         {
-            // Shutdown began. A webhook that landed in the channel microseconds before SIGTERM
-            // was already answered 202 Accepted — dropping it now would lose an incident the
-            // caller believes was filed. Drain whatever is already buffered before the process
-            // exits. TryRead pulls only what is queued, so this terminates promptly and is
-            // bounded by the host shutdown timeout.
+            // Shutdown began. A webhook that landed in the channel just before SIGTERM was already
+            // answered 202 Accepted — dropping it now would lose an incident the caller believes was
+            // filed. Drain whatever is already buffered before the process exits. TryRead pulls only
+            // what is queued, so this terminates promptly; the outer bound is the host shutdown
+            // timeout (default 30s).
             await DrainAsync();
         }
     }
@@ -60,8 +64,8 @@ public sealed class IngestionWorker(
     // No CancellationToken by design: once a job is dequeued it runs to completion. The payload
     // was fully buffered at the endpoint (IngestionJob.RawBody), so parsing does no I/O, and the
     // single SaveChanges is one transaction we never want to half-abort on a shutdown signal —
-    // that is precisely the loss the drain exists to prevent. The host shutdown timeout is the
-    // outer bound if a write genuinely hangs.
+    // that is precisely the loss the drain exists to prevent. The host shutdown timeout (default
+    // 30s) is the outer bound if a write genuinely hangs.
     private async Task ProcessJobAsync(IngestionJob job)
     {
         using var activity = ActivitySource.StartActivity($"ingest.{job.Source}");
@@ -117,8 +121,11 @@ public sealed class IngestionWorker(
             activity?.SetTag("incidentId", incident.Id.ToString());
             logger.LogInformation("Incident {Id} created via {Source}", incident.Id, job.Source);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex)
         {
+            // No OperationCanceledException filter: nothing here takes a token, so cancellation
+            // cannot originate inside this method. Swallow-and-log keeps one poison job from
+            // aborting the rest of a drain.
             activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
             logger.LogWarning(ex, "Failed to process ingestion job from {Source}", job.Source);
         }

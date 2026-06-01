@@ -73,10 +73,11 @@ public sealed class NotificationDispatcher(
         // sharing one context would throw "A second operation was started on this context".
         //
         // Post-commit work runs under CancellationToken.None, not the host token. These rows are
-        // already marked processed and will NOT be retried on restart, so cancelling mid-batch on
-        // a graceful shutdown would lose the notifications permanently. Completing the in-flight
-        // broadcast is the correct trade; each send is still bounded by the per-channel HttpClient
-        // 10s timeout, so a wedged webhook cannot stall shutdown indefinitely.
+        // already marked processed and will NOT be retried on restart, so cancelling mid-batch on a
+        // graceful shutdown would lose the notifications permanently — completing them is the correct
+        // trade. Only the Slack/Teams HTTP leg is independently bounded (per-channel HttpClient 10s
+        // timeout); the SignalR send and DB-hydration legs are not, so on a wedged client or stuck
+        // query the real outer bound is the host shutdown timeout (default 30s).
         using var concurrency = new SemaphoreSlim(BroadcastConcurrency);
         var tasks = batch.Select(msg => BroadcastWithScopeAsync(msg, concurrency, CancellationToken.None));
         await Task.WhenAll(tasks);
