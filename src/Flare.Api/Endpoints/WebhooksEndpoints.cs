@@ -26,9 +26,11 @@ public static class WebhooksEndpoints
 
             var job = new IngestionJob(source, body, headers);
 
+            // TryWrite returns false when the bounded channel is full (FullMode.Wait). Surface that
+            // as 503 backpressure so the sender retries — never a 202 for a job we could not enqueue.
             if (!channelWriter.TryWrite(job))
             {
-                logger.LogWarning("Ingestion channel is full, dropping webhook from {Source}", source);
+                logger.LogWarning("Ingestion channel is full, rejecting webhook from {Source} with 503", source);
                 return Results.StatusCode(503);
             }
 

@@ -21,8 +21,14 @@ public static class ServiceExtensions
         services.AddDbContext<FlareDbContext>((sp, o) =>
             o.UseNpgsql(sp.GetRequiredService<IConfiguration>().GetConnectionString("Postgres")));
 
+        // FullMode.Wait so a full channel makes the non-blocking TryWrite return false instead of
+        // silently dropping the job. The webhook endpoint turns that false into a 503, surfacing
+        // backpressure to the sender (Prometheus/Grafana retry) rather than answering 202 for an
+        // alert it then drops. (DropWrite always returns true, which made the endpoint's 503 path
+        // dead and lost alerts under load.) Capacity 500 is generous for the burst the single-vCPU
+        // box can drain.
         var channel = Channel.CreateBounded<IngestionJob>(
-            new BoundedChannelOptions(500) { FullMode = BoundedChannelFullMode.DropWrite });
+            new BoundedChannelOptions(500) { FullMode = BoundedChannelFullMode.Wait });
 
         // Register writer and reader separately so endpoints get write-only access
         // and the worker gets read-only access — principle of least privilege.
