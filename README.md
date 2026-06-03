@@ -155,7 +155,7 @@ The dev server CORS is already wired into `Program.cs`.
   out the TTL. Admin CRUD lives under `/api/v1/status-pages`; the public
   endpoint sits outside `/api/v1` so a future auth gate on the admin surface
   does not lock customers out of the status page. Admin CRUD is currently
-  unauthenticated — auth lands with the next milestone (see ADR-005).
+  unauthenticated — auth lands with the next milestone.
   See [ADR-005](docs/adr/005-status-page-cache.md) for the cache design.
 - **Slack & Teams channels** — pluggable via `INotificationChannel`. Webhook URLs
   are validated against an HTTPS host allowlist (`hooks.slack.com`,
@@ -212,13 +212,12 @@ The dev server CORS is already wired into `Program.cs`.
 Deliberately out of scope for the MVP:
 
 - **OIDC authentication** — Keycloak or Authentik in `docker-compose`, JWT bearer
-  on `/api/v1/*`, leaving `/public/*` and `/healthz` open. The admin surface is
-  unauthenticated today — token-based access is enough for a self-hosted demo — and
-  the public/admin endpoint split already anticipates the gate, so adding it does
-  not lock customers out of the status page.
+  on `/api/v1/*` with `/public/*` and `/healthz` left open. The admin surface is
+  unauthenticated today; token-based access is enough for a self-hosted demo, and
+  the public/admin endpoint split already anticipates the gate.
 - **On-call scheduling engine** — rotations, overrides, escalation policies, and the
-  timezone math they bring. That is a product on its own; Flare notifies Slack and
-  Teams and stays focused on the response lifecycle rather than paging.
+  timezone math they bring. That is a product in its own right; Flare notifies Slack
+  and Teams, and paging stays out of scope.
 - **AI-assisted postmortem summarization** — an optional LLM pass over the event
   stream to draft narrative Root Cause and Contributing Factors. The deterministic
   `PostmortemDraftBuilder` stays the source of truth; an AI summary is additive.
