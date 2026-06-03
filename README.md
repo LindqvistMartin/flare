@@ -54,7 +54,7 @@ logs, Scalar UI on `/scalar` for the OpenAPI document.
    PulseWatch,  │      GET  /public/status/{slug}  (cached 30s)    │
    generic)     │                                                  │
                 │   IAlertIngestionAdapter (4 implementations)     │
-                │   Channel<IngestionJob>  (bounded, DropWrite)    │
+                │   Channel<IngestionJob>  (bounded, backpressure) │
                 │   PostmortemDraftBuilder (inline, synchronous)   │
                 └──────────────────────────────────────────────────┘
                                            │
@@ -127,8 +127,9 @@ The dev server CORS is already wired into `Program.cs`.
 
 - **Webhook ingestion** — Prometheus, Grafana, PulseWatch, and a Generic adapter
   behind one `IAlertIngestionAdapter` interface. Inbound requests enqueue into a
-  bounded `Channel<IngestionJob>` (DropWrite) so the endpoint returns 202 Accepted
-  even when the worker is behind.
+  bounded `Channel<IngestionJob>`; the endpoint returns 202 Accepted, or 503 when
+  the channel is full so the sender retries rather than accepting a job it could
+  not enqueue.
 - **Append-only timeline** — `IncidentEvents` is protected by a PostgreSQL
   `BEFORE UPDATE OR DELETE` trigger; row mutation throws regardless of caller, ORM,
   or migration framework.
