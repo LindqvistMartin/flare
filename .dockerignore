@@ -1,0 +1,48 @@
+# docker/Dockerfile publishes src/Flare.Api. Anything below either must never
+# reach the image or only bloats the build context sent to the daemon.
+
+# Local secrets / overrides. appsettings.Local.json holds a real connection
+# string and would otherwise be published into the image via COPY src/.
+**/appsettings.Local.json
+**/appsettings.*.local.json
+
+# .NET build output
+**/bin/
+**/obj/
+
+# Frontend: built and deployed separately as a static site, not in the API image
+client/
+
+# Not needed to publish the API
+tests/
+docs/
+scripts/
+docker/
+.github/
+*.md
+
+# VCS
+.git/
+.gitignore
+.gitattributes
+
+# IDE / editor
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+
+# Test & coverage artifacts
+**/TestResults/
+**/*.trx
+**/*.coverage
+**/coverage*.xml
+
+# Node / Playwright (defensive; client/ is already excluded above)
+**/node_modules/
+**/dist/
+**/playwright-report/
+**/test-results/
+**/.env
+**/.env.local
