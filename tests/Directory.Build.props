@@ -1,0 +1,21 @@
+<Project>
+
+  <!-- Inherit the solution-level props, then layer test-only settings on top. -->
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <!-- Integration fixtures join the "Api" xUnit collection and receive the shared
+         ApiFactory, but each builds its own factory per test; the injected parameter is
+         discarded by design, so suppress the unread-primary-ctor-parameter warning. -->
+    <NoWarn>$(NoWarn);CS9113</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Npgsql.EntityFrameworkCore.PostgreSQL floors Relational at 9.0.1, while the rest of
+         the solution is on 9.0.4 via the Design package (PrivateAssets=all, so it does not
+         flow to test projects). Pin Relational here so the test assemblies unify on 9.0.4. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="9.0.4" />
+  </ItemGroup>
+
+</Project>

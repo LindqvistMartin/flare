@@ -18,8 +18,7 @@ namespace Flare.Tests.Integration.Infrastructure;
 
 public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
 {
-    private readonly PostgreSqlContainer _pg = new PostgreSqlBuilder()
-        .WithImage("postgres:16-alpine")
+    private readonly PostgreSqlContainer _pg = new PostgreSqlBuilder("postgres:16-alpine")
         .WithDatabase("flare_test")
         .Build();
 
