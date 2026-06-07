@@ -35,8 +35,12 @@ builder.Services.AddMemoryCache();
 builder.Services.AddSingleton<PostmortemDraftBuilder>();
 builder.Services.AddOpenApi();
 builder.Services.AddSignalR();
+// Deployed frontend origins arrive via config (Cors__AllowedOrigins__0=https://...) so a new
+// host is an env change, not a code change. The fallback keeps local dev zero-config.
+var corsOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
+    ?? ["http://localhost:5173"];
 builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
-    p.WithOrigins("http://localhost:5173").AllowAnyMethod().AllowAnyHeader().AllowCredentials()));
+    p.WithOrigins(corsOrigins).AllowAnyMethod().AllowAnyHeader().AllowCredentials()));
 
 builder.Services.AddOpenTelemetry()
     .WithTracing(t => t

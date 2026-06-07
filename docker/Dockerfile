@@ -1,5 +1,7 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
+# Root build props carry TargetFramework for every project; restore fails without it.
+COPY Directory.Build.props ./
 COPY src/ src/
 RUN dotnet restore src/Flare.Api/Flare.Api.csproj
 RUN dotnet publish src/Flare.Api -c Release -o /app --no-restore
