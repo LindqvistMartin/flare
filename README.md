@@ -7,6 +7,9 @@
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](https://react.dev)
 [![CI](https://github.com/LindqvistMartin/flare/actions/workflows/ci.yml/badge.svg)](https://github.com/LindqvistMartin/flare/actions)
 [![Tests](https://img.shields.io/badge/tests-279%20passing-brightgreen.svg)](#)
+[![Deployed](https://img.shields.io/badge/deployed-render.com-46E3B7.svg)](https://flare-ui.onrender.com)
+
+🔗 **Live demo:** [flare-ui.onrender.com](https://flare-ui.onrender.com) &nbsp;|&nbsp; 📊 **Status page:** [flare-ui.onrender.com/#/p/demo](https://flare-ui.onrender.com/#/p/demo)
 
 ## Why
 
