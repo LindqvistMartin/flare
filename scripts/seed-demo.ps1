@@ -3,10 +3,9 @@
 # and a public status page. Designed to fill every README screenshot frame.
 #
 # Pre-requisites (host):
-#   1. Docker network "flare-net" up with two containers attached:
-#        - flare-pg     (postgres:16)
-#        - flare-api    (flare-api:dev, port 8080:8080)
-#      bring-up sequence is documented in Flare_progress.md Session 12.
+#   1. Flare API on http://localhost:8080 backed by Postgres. Simplest path:
+#        docker compose up -d --build
+#      (brings up postgres + flare-api; the API applies EF migrations on startup).
 #   2. Vite dev server on http://localhost:5173 (cd client; npm run dev).
 #
 # Run from repo root:
