@@ -12,6 +12,7 @@ using OpenTelemetry.Trace;
 using OpenTelemetry.Metrics;
 using Scalar.AspNetCore;
 using Serilog;
+using Serilog.Events;
 
 Log.Logger = new LoggerConfiguration()
     .WriteTo.Console()
@@ -42,21 +43,31 @@ var corsOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<st
 builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
     p.WithOrigins(corsOrigins).AllowAnyMethod().AllowAnyHeader().AllowCredentials()));
 
+// Only wire the OTLP exporter when an endpoint is configured. Left unset (as on Render) it
+// defaults to http://localhost:4317 and fails every export silently; compose sets it for Jaeger.
+var otlpConfigured = !string.IsNullOrWhiteSpace(builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"]);
+
 builder.Services.AddOpenTelemetry()
-    .WithTracing(t => t
-        .SetResourceBuilder(ResourceBuilder.CreateDefault().AddService("Flare"))
-        .AddAspNetCoreInstrumentation()
-        .AddHttpClientInstrumentation()
-        .AddEntityFrameworkCoreInstrumentation()
-        .AddSource("Flare.*")
-        .AddOtlpExporter())
-    .WithMetrics(m => m
-        .AddAspNetCoreInstrumentation()
-        .AddHttpClientInstrumentation()
-        .AddRuntimeInstrumentation()
-        .AddMeter("Flare.Notifications")
-        .AddPrometheusExporter()
-        .AddOtlpExporter());
+    .WithTracing(t =>
+    {
+        t.SetResourceBuilder(ResourceBuilder.CreateDefault().AddService("Flare"))
+            .AddAspNetCoreInstrumentation()
+            .AddHttpClientInstrumentation()
+            .AddEntityFrameworkCoreInstrumentation()
+            .AddSource("Flare.*");
+        if (otlpConfigured)
+            t.AddOtlpExporter();
+    })
+    .WithMetrics(m =>
+    {
+        m.AddAspNetCoreInstrumentation()
+            .AddHttpClientInstrumentation()
+            .AddRuntimeInstrumentation()
+            .AddMeter("Flare.Notifications")
+            .AddPrometheusExporter();
+        if (otlpConfigured)
+            m.AddOtlpExporter();
+    });
 
 var app = builder.Build();
 
@@ -66,7 +77,12 @@ using (var scope = app.Services.CreateScope())
     await db.Database.MigrateAsync();
 }
 
-app.UseSerilogRequestLogging();
+// Health probes hit /healthz every few seconds; logging each at Information drowns the request
+// log on Render. Drop those to Verbose (below the sink) while keeping failures at Error.
+app.UseSerilogRequestLogging(opts => opts.GetLevel = (ctx, _, ex) =>
+    ex != null ? LogEventLevel.Error
+    : ctx.Request.Path.StartsWithSegments("/healthz") ? LogEventLevel.Verbose
+    : LogEventLevel.Information);
 app.UseCors();
 app.UseMiddleware<IdempotencyMiddleware>();
 
