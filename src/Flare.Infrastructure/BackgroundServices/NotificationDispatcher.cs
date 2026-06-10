@@ -100,41 +100,50 @@ public sealed class NotificationDispatcher(
 
     private async Task<IReadOnlyList<PendingBroadcast>> CommitBatchAsync(FlareDbContext db, CancellationToken ct)
     {
-        // SKIP LOCKED prevents concurrent dispatcher instances from processing the same rows.
-        // Rows locked by another transaction are skipped, not blocked on.
-        await using var tx = await db.Database.BeginTransactionAsync(ct);
-
-        var messages = await db.OutboxMessages
-            .FromSqlRaw("""
-                SELECT * FROM "OutboxMessages"
-                WHERE "ProcessedAt" IS NULL
-                ORDER BY "CreatedAt"
-                LIMIT 50
-                FOR UPDATE SKIP LOCKED
-                """)
-            .ToListAsync(ct);
-
-        if (messages.Count == 0)
+        // EnableRetryOnFailure wraps DB work in a retrying execution strategy that rejects a
+        // user-initiated transaction unless it is opened inside the strategy's own scope, so the
+        // claim transaction runs through ExecuteAsync. The unit is idempotent under retry: a failed
+        // attempt rolls back, the rows stay ProcessedAt IS NULL, and the next attempt re-claims them.
+        // Broadcasts fire post-commit in the caller, never in here, so a retry cannot double-send.
+        var strategy = db.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(async () =>
         {
-            await tx.RollbackAsync(ct);
-            return Array.Empty<PendingBroadcast>();
-        }
+            // SKIP LOCKED prevents concurrent dispatcher instances from processing the same rows.
+            // Rows locked by another transaction are skipped, not blocked on.
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
 
-        var pending = new List<PendingBroadcast>(messages.Count);
-        foreach (var msg in messages)
-        {
-            logger.LogInformation("Dispatching outbox message {Type} {Id}", msg.Type, msg.Id);
-            msg.MarkProcessed();
-            pending.Add(new PendingBroadcast(msg.Id, msg.Type, msg.Payload));
-        }
+            var messages = await db.OutboxMessages
+                .FromSqlRaw("""
+                    SELECT * FROM "OutboxMessages"
+                    WHERE "ProcessedAt" IS NULL
+                    ORDER BY "CreatedAt"
+                    LIMIT 50
+                    FOR UPDATE SKIP LOCKED
+                    """)
+                .ToListAsync(ct);
 
-        // Persist mark-processed first. If this throws, the transaction rolls back and the
-        // same rows reappear on the next tick — no broadcasts have fired yet, so re-dispatch
-        // is safe (no duplicates on the wire).
-        await db.SaveChangesAsync(ct);
-        await tx.CommitAsync(ct);
+            if (messages.Count == 0)
+            {
+                await tx.RollbackAsync(ct);
+                return (IReadOnlyList<PendingBroadcast>)Array.Empty<PendingBroadcast>();
+            }
 
-        return pending;
+            var pending = new List<PendingBroadcast>(messages.Count);
+            foreach (var msg in messages)
+            {
+                logger.LogInformation("Dispatching outbox message {Type} {Id}", msg.Type, msg.Id);
+                msg.MarkProcessed();
+                pending.Add(new PendingBroadcast(msg.Id, msg.Type, msg.Payload));
+            }
+
+            // Persist mark-processed first. If this throws, the transaction rolls back and the
+            // same rows reappear on the next tick — no broadcasts have fired yet, so re-dispatch
+            // is safe (no duplicates on the wire).
+            await db.SaveChangesAsync(ct);
+            await tx.CommitAsync(ct);
+
+            return pending;
+        });
     }
 
     private async Task BroadcastAsync(PendingBroadcast msg, FlareDbContext db, CancellationToken ct)

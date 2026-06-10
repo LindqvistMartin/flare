@@ -18,8 +18,14 @@ public static class ServiceExtensions
 {
     public static IServiceCollection AddInfrastructure(this IServiceCollection services)
     {
+        // EnableRetryOnFailure rides out transient drops — notably the first request after Neon's
+        // serverless compute autosuspends and has to cold-start — instead of surfacing a one-off 500.
+        // The one user-initiated transaction (NotificationDispatcher.CommitBatchAsync) runs inside a
+        // CreateExecutionStrategy().ExecuteAsync scope, which the retrying strategy requires.
         services.AddDbContext<FlareDbContext>((sp, o) =>
-            o.UseNpgsql(sp.GetRequiredService<IConfiguration>().GetConnectionString("Postgres")));
+            o.UseNpgsql(
+                sp.GetRequiredService<IConfiguration>().GetConnectionString("Postgres"),
+                npgsql => npgsql.EnableRetryOnFailure()));
 
         // FullMode.Wait so a full channel makes the non-blocking TryWrite return false instead of
         // silently dropping the job. The webhook endpoint turns that false into a 503, surfacing
