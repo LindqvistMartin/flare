@@ -1,6 +1,6 @@
 # Flare
 
-**Self-hosted incident management. From alert to postmortem — without the SaaS bill.**
+**Self-hosted incident management. From first alert to published postmortem, without the per-seat SaaS bill.**
 
 [![MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-10-purple.svg)](https://dotnet.microsoft.com)
@@ -10,6 +10,8 @@
 [![Deployed](https://img.shields.io/badge/deployed-render.com-46E3B7.svg)](https://flare-ui.onrender.com)
 
 🔗 **Live demo:** [flare-ui.onrender.com](https://flare-ui.onrender.com) &nbsp;|&nbsp; 📊 **Status page:** [flare-ui.onrender.com/#/p/demo](https://flare-ui.onrender.com/#/p/demo)
+
+> A small self-hosted SRE stack, built to chain: **pulsewatch** to detect, **sluice** to route webhooks, **flare** to run the incident.
 
 ## Why
 
@@ -31,9 +33,9 @@ pages — with one `docker compose up`. Self-hosted, single deployable monolith,
 
 ## Screenshots
 
-![Dashboard with five active incidents, MTTR 30-day trend, and overdue action items](docs/screenshots/dashboard.png)
 ![Incident detail with assigned roles, timeline feed, and per-service runbook sidebar](docs/screenshots/incident-detail.png)
 ![Postmortem auto-drafted from the incident event stream with action items](docs/screenshots/postmortem.png)
+![Dashboard with five active incidents, MTTR 30-day trend, and overdue action items](docs/screenshots/dashboard.png)
 ![Action items tracker with All / Open / In progress / Done / Overdue filters](docs/screenshots/action-items.png)
 ![Service catalogue with 30-day incident counts and runbook-ready indicator](docs/screenshots/services.png)
 ![Command palette: search, navigation, dark-mode toggle, recent incidents](docs/screenshots/cmd-k.png)
