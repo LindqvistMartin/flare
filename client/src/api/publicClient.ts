@@ -9,7 +9,9 @@ import axios from 'axios'
 // (NetworkErrorShell), not developer-style toasts.
 const publicApi = axios.create({
   baseURL: (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:5000',
-  timeout: 10_000,
+  // Free-tier hosts cold-start in ~30-50s after idle; keep the request open long
+  // enough that the first call wakes the backend instead of aborting at 10s.
+  timeout: 35_000,
   withCredentials: false,
 })
 
